@@ -2,6 +2,10 @@ import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem import Descriptors
+import numpy as np
+import matplotlib.pyplot as plt
+from coati.generative.coati_purifications import embed_smiles
+from rdkit import Chem
 
 # Calculating RDKit Descriptors
 def CalcRDKitDescriptors(fileName):
