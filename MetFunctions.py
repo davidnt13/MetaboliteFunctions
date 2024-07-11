@@ -19,7 +19,7 @@ from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from sklearn.svm import SVR
 
-import GenerateDescriptors
+from GenerateDescriptors import *
 
 modelTypes = {}
 modelTypes['RF'] = RandomForestRegressor()
@@ -272,12 +272,13 @@ def mixedCVSaveAvg(fileName, descr, model):
     avgResults = pd.DataFrame(data= [], columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep', 'Model', 'Descriptor', 'Index'])
 
     for index in range(1, 4):
-        _,_, avgVals = loopedKfoldCrossVal(model, 10, train_X, train_y, f"Mixture_{model}_{descr}_{index}", metabolites)
+        myPreds,_, avgVals = loopedKfoldCrossVal(model, 10, train_X, train_y, f"Mixture_{model}_{descr}_{index}", metabolites)
         avgVals['Model'] = model
         avgVals['Descriptor'] = descr
         avgVals['Index'] = index
         avgResults = pd.concat([avgResults, avgVals])
-        
+    plotCVResults(train_y, myPreds, f"Mixture_{model}_{descr}_{index}")
+
     return avgResults
 
 # Mixed Scaffold Cross Validation (And Saving Results)
