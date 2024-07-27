@@ -15,16 +15,39 @@ from sklearn.model_selection import KFold, cross_val_score
 from sklearn.model_selection import GroupKFold, cross_val_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 
-from sklearn.ensemble import RandomForestRegressor
-from xgboost import XGBRegressor
-from sklearn.svm import SVR
-
-from GenerateDescriptors import *
-
 modelTypes = {}
-modelTypes['RF'] = RandomForestRegressor()
-modelTypes['XGBR'] = XGBRegressor()
-modelTypes['SVR'] = SVR()
+
+use_mgk = True
+
+if not use_mgk:
+
+    from GenerateDescriptors import *
+    from sklearn.ensemble import RandomForestRegressor
+    from xgboost import XGBRegressor
+    from sklearn.svm import SVR
+    modelTypes['RF'] = RandomForestRegressor
+    modelTypes['XGBR'] = XGBRegressor
+    modelTypes['SVR'] = SVR
+
+    try:
+        import chemprop
+        from models import SimpleNN, ChempropModel
+        modelTypes['torchNN'] = SimpleNN
+        modelTypes['chemprop'] = ChempropModel
+    except ModuleNotFoundError:
+        print('WARNING: Cannot import chemprop python module')
+
+else:
+
+    try:
+        import mgktools
+        import mgktools.data
+        import mgktools.kernels.utils
+        import mgktools.hyperparameters
+        from mgktools.models.regression.GPRgraphdot.gpr import GPR
+        modelTypes['MGK'] = GPR
+    except ModuleNotFoundError:
+        print('WARNING: Cannot import mgktools python modules')
 
 # Making Train and Test, in addition to Descriptors/Fingerprints
 def makeTrainAndTestDesc(fileNameTrain, fileNameTest, target, desc):
@@ -113,16 +136,94 @@ def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor 
     else:
         train_test_split = StratifiedKFold(n_splits = num_cv, shuffle = True, random_state = 1)
 
+    if modelType == 'chemprop':
+        dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y]) 
+                   for smi, y in zip(train_X, train_y)]
+
+    elif modelType == 'MGK':
+        dataset = mgktools.data.data.Dataset.from_df(
+                      pd.concat([train_X, train_y], axis=1).reset_index(), 
+                      pure_columns=[train_X.name],
+                      target_columns=[train_y.name],
+                      n_jobs=-1
+                     )
+        kernel_config = mgktools.kernels.utils.get_kernel_config(
+                            dataset,
+                            graph_kernel_type='graph',
+                            # Arguments for marginalized graph kernel:
+                            mgk_hyperparameters_files=[
+                                mgktools.hyperparameters.product_msnorm], 
+                           )
+        dataset.graph_kernel_type = 'graph'
+
     for n, (train_idx, test_idx) in enumerate(train_test_split.split(train_X, distributor)):
-        x_train = train_X.iloc[train_idx]
-        x_test = train_X.iloc[test_idx]
+
         y_train = train_y.iloc[train_idx]
         y_test = train_y.iloc[test_idx]
 
+        model_opts = {}
+        model_fit_opts = {}
+
+        if modelType == 'MGK':
+            x_train = mgktools.data.split.get_data_from_index(dataset, 
+                                                              train_idx).X
+            x_test = mgktools.data.split.get_data_from_index(dataset, 
+                                                             test_idx).X
+            model_opts = {'kernel' : kernel_config.kernel, 
+                          'optimizer' : None, 
+                          'alpha' : 0.01, 
+                          'normalize_y' : True}
+
+        elif modelType == 'chemprop':
+            # Split data into training and test sets:
+            train_data, val_data, test_data = \
+            chemprop.data.split_data_by_indices(dataset, 
+                                                train_indices=train_idx, 
+                                                val_indices=None, 
+                                                test_indices=test_idx
+                                               )
+
+            # Calculate features for molecules:
+            featurizer = chemprop.featurizers.SimpleMoleculeMolGraphFeaturizer()
+            train_dset = chemprop.data.MoleculeDataset(train_data, featurizer)
+            test_dset = chemprop.data.MoleculeDataset(test_data, featurizer)
+
+            # Scale y data based on training set:
+            scaler = train_dset.normalize_targets()
+            model_opts = {'y_scaler' : scaler}
+
+            # Set up dataloaders for feeding data into models:
+            train_loader = chemprop.data.build_dataloader(train_dset)
+            test_loader = chemprop.data.build_dataloader(test_dset, shuffle=False)
+
+            # Make name consistent with non-chemprop models:
+            x_train = train_loader
+            x_test = test_loader
+
+        else:
+            x_train = train_X.iloc[train_idx]
+            x_test = train_X.iloc[test_idx]
+
+            scaler = StandardScaler()
+            x_train = scaler.fit_transform(x_train)
+            x_test = scaler.transform(x_test)
+
+            if modelType == 'torchNN':
+                y_scaler = StandardScaler()
+                y_train = y_scaler.fit_transform(np.array(y_train).reshape(-1, 1))
+                # x_train = SimplePyTorchDataset(x_train, y_train)
+                # x_test = SimplePyTorchDataset(x_test, y_test)
+                model_opts = {'y_scaler' : y_scaler, 'input_size' : x_train.shape[1]}
+                model_fit_opts = {'X_val' : torch.tensor(x_test, dtype=torch.float32), 
+                                  'y_val' : y_test
+                                 }
+
         model = modelTypes[modelType]
+        model = model(**model_opts)
 
         # Train model
-        model.fit(x_train, y_train)
+        model.fit(x_train, y_train, **model_fit_opts)
+        # model.plot_training_loss()
 
         y_pred = model.predict(x_test)
 
