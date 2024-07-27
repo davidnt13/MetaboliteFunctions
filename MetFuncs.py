@@ -98,8 +98,7 @@ def plotCVResults(modelType, train_y, myPreds, title):
     plt.savefig(f'{title}: CV{modelType}_modelResults.png')
     #plt.show()
 
-def loopedKfoldCrossVal(modelType, cycleNum, train_X, train_y, title, distributor = None):
-    num_cv = cycleNum
+def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor = None):
     predictions_filename = f'{title}: CV{modelType}_predictions.csv'
 
     predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
