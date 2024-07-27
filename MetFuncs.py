@@ -104,7 +104,8 @@ def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor 
     predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
     predictionStats = pd.DataFrame(data=np.zeros((num_cv, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])
 
-    myPreds = pd.DataFrame(index=train_y.index, columns=['Prediction', 'Fold'])
+    myPreds = pd.DataFrame(index=range(len(train_y)), #index=train_y.index,
+                           columns=['Prediction', 'Fold'])
     myPreds['Prediction'] = np.nan
     myPreds['Fold'] = np.nan
 
