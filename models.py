@@ -7,7 +7,7 @@ import chemprop
 from lightning import pytorch as pl
 import math
 import matplotlib.pyplot as plt
-
+from pl.callbacks import EarlyStopping
 
 # ========== #
 # PyTorch NN #
@@ -68,7 +68,11 @@ class SimpleNN(torch.nn.Module):
         train_loader = torch.utils.data.DataLoader(dataset=dataset, 
                                   batch_size=batch_size, 
                                   shuffle=True)
-      
+        
+        patience = 5
+        best_loss = float('inf')
+        counter = 0
+
         for epoch in range(n_epochs):
             epoch_loss = 0
 
@@ -93,10 +97,21 @@ class SimpleNN(torch.nn.Module):
                                      np.array(y_val).reshape(-1, 1)),
                                  dtype=torch.float32)
                 y_val_pred = self.forward(X_val)
-                loss = loss_fn(y_val_pred, 
+                val_loss = loss_fn(y_val_pred, 
                                y_val_scaled)
                 self.validation_loss.append(loss.item())
             
+            if val_loss.item() < best_loss:
+                best_loss = val_loss.item()
+                counter = 0  # Reset patience counter if validation loss improves
+            else:
+                counter += 1  # Increment counter if no improvement
+
+            # If patience limit is reached, stop training
+            if counter >= patience:
+                print(f"Early stopping at epoch {epoch} due to no improvement.")
+                break
+
             if verbose:
                 print(f'Epoch: {epoch:4d}, Loss: {epoch_loss:.3f}')
     
@@ -141,6 +156,13 @@ class ChempropModel():
         self.mpnn = chemprop.models.MPNN(mp, agg, ffn, 
                                          #batch_norm, metric_list)
                                          )
+        
+        early_stopping = EarlyStopping(
+                monitor = 'val_loss',
+                patience = 5,
+                mode = 'min',
+                verbose = True
+                )
 
         # Set up pytorch trainer:
         self.trainer = pl.Trainer(logger=False,
@@ -151,6 +173,7 @@ class ChempropModel():
                                   accelerator="auto",
                                   devices=1,
                                   max_epochs=max_epochs,
+                                  callbacks = [early_stopping]
                                  )
 
     def fit(self,

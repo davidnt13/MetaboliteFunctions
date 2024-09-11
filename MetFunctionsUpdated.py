@@ -25,10 +25,18 @@ from sklearn.model_selection import KFold, cross_val_score
 from sklearn.model_selection import GroupKFold, cross_val_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 
+#import argparse
+
 # Setting Up Model Types
 modelTypes = {}
 
-use_mgk = True
+#parser = argparse.ArgumentParser()
+#parser.add_argument('--use_mgk',
+#                    action = 'store_true',
+#                    help="For running metabolite models with MGK")
+#args = parser.parse_args()
+
+use_mgk = False
 
 if not use_mgk:
 
@@ -56,7 +64,9 @@ else:
         import mgktools.kernels.utils
         import mgktools.hyperparameters
         from mgktools.models.regression.GPRgraphdot.gpr import GPR
+        from mgktools.models.regression import SVR
         modelTypes['MGK'] = GPR
+        modelTypes['MGKSVR'] = SVR
     except ModuleNotFoundError:
         print('WARNING: Cannot import mgktools python modules')
 
@@ -111,15 +121,19 @@ def makeTrainAndTest(fileNameTrain, fileNameTest, target):
 def makeTrainAndTestGraph(fileNameTrain, fileNameTest, target):
     dfTrain = pd.read_csv(fileNameTrain)
     dfTest = pd.read_csv(fileNameTest)
-    train_X = dfTrain.dropna(axis = 0)\
-                    .drop(target, axis = 1)\
-                    .drop("ChEMBL_ID", axis = 1)\
-                    .drop("natural_product", axis = 1)
+    #train_X = dfTrain.dropna(axis = 0)\
+     #               .reset_index()\
+      #              .drop(target, axis = 1)\
+       #             .drop("ChEMBL_ID", axis = 1)\
+        #            .drop("natural_product", axis = 1)
+    train_X = dfTrain['SMILES']
     train_y = dfTrain[target]
-    test_X = dfTest.dropna(axis = 0)\
-                    .drop(target, axis = 1)\
-                    .drop("ChEMBL_ID", axis = 1)\
-                    .drop("natural_product", axis = 1)
+    #test_X = dfTest.dropna(axis = 0)\
+    #                .reset_index()\
+    #                .drop(target, axis = 1)\
+    #                .drop("ChEMBL_ID", axis = 1)\
+    #                .drop("natural_product", axis = 1)
+    test_X = dfTest['SMILES']
     test_y = dfTest[target]
 
     return train_X, train_y, test_X, test_y
@@ -169,15 +183,16 @@ def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor 
                    for smi, y in zip(train_X.loc[:,'SMILES'], train_y)]
 
     elif modelType == 'MGK':
-        if isinstance(train_y, pd.Series):
-            train_y = train_y.to_frame(name='Target')  # Convert Series to DataFrame
-        else:
-            train_y = train_y.rename(columns={train_y.columns[0]: 'Target'})
+        #if isinstance(train_y, pd.Series):
+         #   train_y = train_y.to_frame(name='Target')  # Convert Series to DataFrame
+        #else:
+         #   train_y = train_y.rename(columns={train_y.columns[0]: 'Target'})
         dataset = mgktools.data.data.Dataset.from_df(
                       pd.concat([train_X, train_y], axis=1).reset_index(),
-                      #pure_columns=[train_X.name],
-                      pure_columns=['Mol'],
-                      target_columns=['Target'],
+                      pure_columns=[train_X.name],
+                      #pure_columns=['Mol'],
+                      #target_columns=['Target'],
+                      target_columns=[train_y.name],
                       n_jobs=-1
                      )
         kernel_config = mgktools.kernels.utils.get_kernel_config(
@@ -253,9 +268,12 @@ def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor 
 
         model = modelTypes[modelType]
         model = model(**model_opts)
+        
+        import pickle as pk
+        pk.dump(y_train, open('y_train.pk', "wb"))
 
         # Train model
-        model.fit(x_train, y_train, **model_fit_opts)
+        model.fit(x_train, y_train.squeeze(), **model_fit_opts)
         # model.plot_training_loss()
 
         y_pred = model.predict(x_test)
@@ -483,7 +501,7 @@ def modelStats(test_y, y_pred):
     # Coefficient of determination
     r2 = r2_score(test_y, y_pred)
     # Root mean squared error
-    rmsd = mean_squared_error(test_y, y_pred)**0.5
+    rmsd = root_mean_squared_error(test_y, y_pred)
     # Bias
     bias = np.mean(y_pred - test_y)
     # Standard deviation of the error of prediction
@@ -528,11 +546,29 @@ def listAvg(df, index, model_vars, test_y, y_pred):
 
 # Method for Plotting a Model's Results
 def plotModel(modelType, train_X, train_y, test_X, test_y, title):
-    scaler = StandardScaler()
-    train_X = scaler.fit_transform(train_X)
-    test_X = scaler.transform(test_X)
 
-    if modelType == 'torchNN':
+    model_opts = {}
+    model_fit_opts = {}
+
+    if modelType == 'chemprop':
+        train_dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
+                   for smi, y in zip(train_X['SMILES'], train_y)]
+        test_dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
+                   for smi, y in zip(test_X['SMILES'], test_y)]
+        featurizer = chemprop.featurizers.SimpleMoleculeMolGraphFeaturizer()
+        train_dset = chemprop.data.MoleculeDataset(train_dataset, featurizer)
+        test_dset = chemprop.data.MoleculeDataset(test_dataset, featurizer)
+        scaler = train_dset.normalize_targets()
+        model_opts = {'y_scaler' : scaler}
+        train_loader = chemprop.data.build_dataloader(train_dset)
+        test_loader = chemprop.data.build_dataloader(test_dset, shuffle=False)
+        train_X = train_loader
+        test_X = test_loader
+
+    elif modelType == 'torchNN':
+        scaler = StandardScaler()
+        train_X = scaler.fit_transform(train_X)
+        test_X = scaler.transform(test_X)
         y_scaler = StandardScaler()
         train_y = y_scaler.fit_transform(np.array(train_y).reshape(-1, 1))
         # x_train = SimplePyTorchDataset(x_train, y_train)
@@ -540,20 +576,91 @@ def plotModel(modelType, train_X, train_y, test_X, test_y, title):
         model_opts = {'y_scaler' : y_scaler, 'input_size' : train_X.shape[1]}
         model_fit_opts = {'X_val' : torch.tensor(test_X, dtype=torch.float32),
                           'y_val' : test_y
-                         }
+                        }
+    
+    elif modelType == 'MGK':
+        dataset_train = mgktools.data.data.Dataset.from_df(
+                      pd.concat([train_X, train_y], axis=1).reset_index(),
+                      pure_columns=[train_X.name],
+                      #pure_columns=['Mol'],
+                      #target_columns=['Target'],
+                      target_columns=[train_y.name],
+                      n_jobs=-1
+                     )
+        kernel_config = mgktools.kernels.utils.get_kernel_config(
+                            dataset_train,
+                            graph_kernel_type='graph',
+                            # Arguments for marginalized graph kernel:
+                            mgk_hyperparameters_files=[
+                                mgktools.hyperparameters.product_msnorm],
+                           )
+        dataset_train.graph_kernel_type = 'graph'
+        model_opts = {'kernel' : kernel_config.kernel,
+                          'optimizer' : None,
+                          'alpha' : 0.01,
+                          'normalize_y' : True}
+        dataset_test = mgktools.data.data.Dataset.from_df(
+                      pd.concat([test_X, test_y], axis=1).reset_index(),
+                      pure_columns=[test_X.name],
+                      #pure_columns=['Mol'],
+                      #target_columns=['Target'],
+                      target_columns=[test_y.name],
+                      n_jobs=-1
+                     )
+        dataset_test.graph_kernel_type = 'graph'
+        train_X = dataset_train.X
+        train_y = dataset_train.y
+        test_X = dataset_test.X
+        test_y = dataset_test.y
+
+    elif modelType == 'MGKSVR':
+        dataset_train = mgktools.data.data.Dataset.from_df(
+                      pd.concat([train_X, train_y], axis=1).reset_index(),
+                      pure_columns=[train_X.name],
+                      #pure_columns=['Mol'],
+                      #target_columns=['Target'],
+                      target_columns=[train_y.name],
+                      n_jobs=-1
+                     )
+        kernel_config = mgktools.kernels.utils.get_kernel_config(
+                            dataset_train,
+                            graph_kernel_type='graph',
+                            # Arguments for marginalized graph kernel:
+                            mgk_hyperparameters_files=[
+                                mgktools.hyperparameters.product_msnorm],
+                           )
+        dataset_train.graph_kernel_type = 'graph'
+        model_opts = {'kernel' : kernel_config.kernel,
+                          'C' : 10.0}
+        dataset_test = mgktools.data.data.Dataset.from_df(
+                      pd.concat([test_X, test_y], axis=1).reset_index(),
+                      pure_columns=[test_X.name],
+                      #pure_columns=['Mol'],
+                      #target_columns=['Target'],
+                      target_columns=[test_y.name],
+                      n_jobs=-1
+                     )
+        dataset_test.graph_kernel_type = 'graph'
+        train_X = dataset_train.X
+        train_y = dataset_train.y
+        test_X = dataset_test.X
+        test_y = dataset_test.y
 
     model = modelTypes[modelType]
     model = model(**model_opts)
 
-    model.fit(train_X, train_y)
+    model.fit(train_X, train_y, **model_fit_opts)
     y_pred = model.predict(test_X)
-    plotter(modelType, test_y, y_pred, title)
+    #plotter(modelType, test_y, y_pred, title)
     return y_pred
 
 # The Full Stuff: Making a Train/Test, Running CV, and Getting Model Results
 def makeModel(fileNameTrain, fileNameTest, desc, model, title, distributor = None):
-    train_X, train_y, test_X, test_y = makeTrainAndTestDesc(fileNameTrain, fileNameTest, 'pIC50', desc)
-    df = pd.DataFrame(data = [], columns = ['Descriptors',	'Model', 'Train','Test', 'R2', 'RMSD', 'Bias', 'SDEP', 'Index'])
+    if model != 'chemprop' and  model != 'MGK' and model != 'MGKSVR':
+        train_X, train_y, test_X, test_y = makeTrainAndTestDesc(fileNameTrain, fileNameTest, 'pIC50', desc)
+    else:
+        train_X, train_y, test_X, test_y = makeTrainAndTestGraph(fileNameTrain, fileNameTest, 'pIC50')
+    df = pd.DataFrame(data = [], columns = ['Descriptors', 'Model', 'Train','Test', 'R2', 'RMSD', 'Bias', 'SDEP', 'Index'])
     modelVars = [desc, model, fileNameTrain, fileNameTest]
     for i in range(1, 4):
         #myPreds, predictionStats = loopedKfoldCrossVal(model, 10, train_X, train_y, f"{title} + {i}", distributor)
