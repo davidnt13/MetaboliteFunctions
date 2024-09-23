@@ -24,21 +24,13 @@ from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import KFold, cross_val_score
 from sklearn.model_selection import GroupKFold, cross_val_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score
+import os
 
-#import argparse
-
-# Setting Up Model Types
 modelTypes = {}
 
-#parser = argparse.ArgumentParser()
-#parser.add_argument('--use_mgk',
-#                    action = 'store_true',
-#                    help="For running metabolite models with MGK")
-#args = parser.parse_args()
+use_mgk = os.environ.get("USE_MGK")
 
-use_mgk = False
-
-if not use_mgk:
+if use_mgk != "TRUE":
 
     from GenerateDescriptors import *
     from sklearn.ensemble import RandomForestRegressor
@@ -138,6 +130,12 @@ def makeTrainAndTestGraph(fileNameTrain, fileNameTest, target):
 
     return train_X, train_y, test_X, test_y
 
+def makeTrainAndTestGraphCV(CVName, fileNameTrain, fileNameTest, target):
+    df = pd.read_csv(fileNameTrain)
+    dfTrain = df.loc(df["natural_product"] == "TRUE")
+    dfTest = df.loc(df["natural_product"] == "FALSE")
+    return dfTrain, dfTest
+
 # Plotting CV Results
 def plotCVResults(train_y, myPreds, title = None):
 
@@ -163,6 +161,7 @@ def plotCVResults(train_y, myPreds, title = None):
 
 # Looped Kfold CrossVal (NOT A MIXED SET)
 def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor = None):
+
     predictions_filename = f'{title}: CV{modelType}_predictions.csv'
 
     predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
@@ -224,6 +223,7 @@ def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor 
 
         elif modelType == 'chemprop':
             # Split data into training and test sets:
+            train_idx, val_idx, _ = make_split_indices(train_idx, sizes=(0.9, 0.1, 0))
             train_data, val_data, test_data = \
             chemprop.data.split_data_by_indices(dataset,
                                                 train_indices=train_idx,
@@ -296,6 +296,171 @@ def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor 
 
         # Ensure correct number of values are assigned
         predictionStats.iloc[n] = [n + 1, len(test_idx), r2, rmsd, bias, sdep]
+
+    # Calculate averages
+    r2_av = predStats['r2_sum'] / num_cv
+    rmsd_av = predStats['rmsd_sum'] / num_cv
+    bias_av = predStats['bias_sum'] / num_cv
+    sdep_av = predStats['sdep_sum'] / num_cv
+
+    # Create a DataFrame row for averages
+    avg_row = pd.DataFrame([['Average', len(train_y), r2_av, rmsd_av, bias_av, sdep_av]], columns=predictionStats.columns)
+
+    # Append average row to the DataFrame
+    predictionStats = pd.concat([predictionStats, avg_row], ignore_index=True)
+
+    return myPreds, predictionStats, avg_row
+
+def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributor = None):
+    dfTrain = pd.read_csv(fileName)
+    
+    if (group == 'NP'):
+     #   dfTrain = df.loc(df["natural_product"] == "TRUE")
+        fold_columns = [col for col in dfTrain.columns if 'train-NP' in col]
+    elif (group == 'NonNP'):
+     #   dfTrain = df.loc(df["natural_product"] == "FALSE")
+        fold_columns = [col for col in dfTrain.columns if 'train-nonNP' in col]
+    
+    train_X = dfTrain["SMILES"]
+    train_y = dfTrain["pIC50"]
+
+    predictions_filename = f'{title}: CV{modelType}_predictions.csv'
+
+    predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
+    predictionStats = pd.DataFrame(data=np.zeros((num_cv, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])
+
+    myPreds = pd.DataFrame(index=range(len(train_y)), #index=train_y.index,
+                           columns=['Prediction', 'Fold'])
+    myPreds['Prediction'] = np.nan
+    myPreds['Fold'] = np.nan
+
+   # if distributor is None:
+   #     train_test_split = KFold(n_splits = num_cv, shuffle=True, random_state=1)
+   # else:
+   #     train_test_split = StratifiedKFold(n_splits = num_cv, shuffle = True, random_state = 1)
+
+    if modelType == 'chemprop':
+        dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
+                   for smi, y in zip(train_X, train_y)]
+
+    elif modelType == 'MGK':
+        #if isinstance(train_y, pd.Series):
+         #   train_y = train_y.to_frame(name='Target')  # Convert Series to DataFrame
+        #else:
+         #   train_y = train_y.rename(columns={train_y.columns[0]: 'Target'})
+        dataset = mgktools.data.data.Dataset.from_df(
+                      pd.concat([train_X, train_y], axis=1).reset_index(),
+                      pure_columns=[train_X.name],
+                      #pure_columns=['Mol'],
+                      #target_columns=['Target'],
+                      target_columns=[train_y.name],
+                      n_jobs=-1
+                     )
+        kernel_config = mgktools.kernels.utils.get_kernel_config(
+                            dataset,
+                            graph_kernel_type='graph',
+                            # Arguments for marginalized graph kernel:
+                            mgk_hyperparameters_files=[
+                                mgktools.hyperparameters.product_msnorm],
+                           )
+        dataset.graph_kernel_type = 'graph'
+
+    for fold_number, fold_column in enumerate(fold_columns):
+        
+        train_idx = dfTrain[dfTrain[fold_column] == 'train'].index
+        test_idx = dfTrain[dfTrain[fold_column] == 'test'].index
+        
+        y_train = train_y.iloc[train_idx]
+        y_test = train_y.iloc[test_idx]
+
+        model_opts = {}
+        model_fit_opts = {}
+
+        if modelType == 'MGK':
+            x_train = mgktools.data.split.get_data_from_index(dataset,
+                                                              train_idx).X
+            x_test = mgktools.data.split.get_data_from_index(dataset,
+                                                             test_idx).X
+            model_opts = {'kernel' : kernel_config.kernel,
+                          'optimizer' : None,
+                          'alpha' : 0.01,
+                          'normalize_y' : True}
+
+        elif modelType == 'chemprop':
+            # Split data into training and test sets:
+            
+            train_data, val_data, test_data = \
+            chemprop.data.split_data_by_indices(dataset,
+                                                train_indices=train_idx,
+                                                val_indices=None,
+                                                test_indices=test_idx
+                                               )
+
+            # Calculate features for molecules:
+            featurizer = chemprop.featurizers.SimpleMoleculeMolGraphFeaturizer()
+            train_dset = chemprop.data.MoleculeDataset(train_data, featurizer)
+            test_dset = chemprop.data.MoleculeDataset(test_data, featurizer)
+
+            # Scale y data based on training set:
+            scaler = train_dset.normalize_targets()
+            model_opts = {'y_scaler' : scaler}
+
+            # Set up dataloaders for feeding data into models:
+            train_loader = chemprop.data.build_dataloader(train_dset)
+            test_loader = chemprop.data.build_dataloader(test_dset, shuffle=False)
+
+            # Make name consistent with non-chemprop models:
+            x_train = train_loader
+            x_test = test_loader
+
+        else:
+            x_train = train_X.iloc[train_idx]
+            x_test = train_X.iloc[test_idx]
+
+            scaler = StandardScaler()
+            x_train = scaler.fit_transform(x_train)
+            x_test = scaler.transform(x_test)
+
+            if modelType == 'torchNN':
+                y_scaler = StandardScaler()
+                y_train = y_scaler.fit_transform(np.array(y_train).reshape(-1, 1))
+                # x_train = SimplePyTorchDataset(x_train, y_train)
+                # x_test = SimplePyTorchDataset(x_test, y_test)
+                model_opts = {'y_scaler' : y_scaler, 'input_size' : x_train.shape[1]}
+                model_fit_opts = {'X_val' : torch.tensor(x_test, dtype=torch.float32),
+                                  'y_val' : y_test
+                                 }
+
+        model = modelTypes[modelType]
+        model = model(**model_opts)
+
+        import pickle as pk
+        pk.dump(y_train, open('y_train.pk', "wb"))
+
+        # Train model
+        model.fit(x_train, y_train.squeeze(), **model_fit_opts)
+        # model.plot_training_loss()
+
+        y_pred = model.predict(x_test)
+
+        # Metrics calculations
+        r2 = r2_score(y_test, y_pred)
+        rmsd = root_mean_squared_error(y_test, y_pred)
+        bias = np.mean(y_pred - y_test)
+        sdep = np.std(y_pred - y_test)
+
+        # Update stats
+        predStats['r2_sum'] += r2
+        predStats['rmsd_sum'] += rmsd
+        predStats['bias_sum'] += bias
+        predStats['sdep_sum'] += sdep
+
+        # Update predictions
+        myPreds.loc[test_idx, 'Prediction'] = y_pred
+        myPreds.loc[test_idx, 'Fold'] = fold_number + 1
+
+        # Ensure correct number of values are assigned
+        predictionStats.iloc[fold_number] = [fold_number + 1, len(test_idx), r2, rmsd, bias, sdep]
 
     # Calculate averages
     r2_av = predStats['r2_sum'] / num_cv
@@ -551,31 +716,39 @@ def plotModel(modelType, train_X, train_y, test_X, test_y, title):
     model_fit_opts = {}
 
     if modelType == 'chemprop':
+        train_X, val_X, train_y, val_y = train_test_split(train_X, train_y, test_size = 0.1)
         train_dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
-                   for smi, y in zip(train_X['SMILES'], train_y)]
+                   for smi, y in zip(train_X, train_y)]
         test_dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
-                   for smi, y in zip(test_X['SMILES'], test_y)]
+                   for smi, y in zip(test_X, test_y)]
+        val_dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
+                   for smi, y in zip(val_X, val_y)] 
         featurizer = chemprop.featurizers.SimpleMoleculeMolGraphFeaturizer()
         train_dset = chemprop.data.MoleculeDataset(train_dataset, featurizer)
         test_dset = chemprop.data.MoleculeDataset(test_dataset, featurizer)
+        val_dset = chemprop.data.MoleculeDataset(val_dataset, featurizer)
         scaler = train_dset.normalize_targets()
         model_opts = {'y_scaler' : scaler}
         train_loader = chemprop.data.build_dataloader(train_dset)
         test_loader = chemprop.data.build_dataloader(test_dset, shuffle=False)
+        val_loader = chemprop.data.build_dataloader(val_dset, shuffle = False)
         train_X = train_loader
         test_X = test_loader
+        val_X = val_loader
 
     elif modelType == 'torchNN':
         scaler = StandardScaler()
+        train_X, val_X, train_y, val_y = train_test_split(train_X, train_y, test_size = 0.1)
         train_X = scaler.fit_transform(train_X)
+        val_X = scaler.transform(val_X)
         test_X = scaler.transform(test_X)
         y_scaler = StandardScaler()
         train_y = y_scaler.fit_transform(np.array(train_y).reshape(-1, 1))
         # x_train = SimplePyTorchDataset(x_train, y_train)
         # x_test = SimplePyTorchDataset(x_test, y_test)
         model_opts = {'y_scaler' : y_scaler, 'input_size' : train_X.shape[1]}
-        model_fit_opts = {'X_val' : torch.tensor(test_X, dtype=torch.float32),
-                          'y_val' : test_y
+        model_fit_opts = {'X_val' : torch.tensor(val_X, dtype=torch.float32),
+                          'y_val' : val_y
                         }
     
     elif modelType == 'MGK':
@@ -649,7 +822,11 @@ def plotModel(modelType, train_X, train_y, test_X, test_y, title):
     model = modelTypes[modelType]
     model = model(**model_opts)
 
-    model.fit(train_X, train_y, **model_fit_opts)
+    if (modelType == 'chemprop'):
+        model.fit(train_X, val_X, **model_fit_opts)
+    else:
+        model.fit(train_X, train_y, **model_fit_opts)
+    
     y_pred = model.predict(test_X)
     #plotter(modelType, test_y, y_pred, title)
     return y_pred
@@ -689,6 +866,18 @@ def makeModelCVAvg2(fileNameTrain, fileNameTest, model, title, trainName, distri
     avgResults = pd.DataFrame(data= [], columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep', 'Model', 'Descriptor', 'Index', 'Train Set'])
     for i in range(1, 4):
         _,_, avgVals = loopedKfoldCrossVal(model, 10, train_X, train_y, f"{title}_{model}_{i}")
+        avgVals['Model'] = model
+        avgVals['Descriptor'] = 'N/A'
+        avgVals['Index'] = i
+        avgVals['Train Set'] = trainName
+        avgResults = pd.concat([avgResults, avgVals])
+    return avgResults
+
+def modelCVSetTest(fileNameTrain, fileNameTest, model, title, trainName, distributor = None):
+    #train_X, train_y, test_X, test_y = makeTrainAndTestGraph(fileNameTrain, fileNameTest, 'pIC50')
+    avgResults = pd.DataFrame(data= [], columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep', 'Model', 'Descriptor', 'Index', 'Train Set'])
+    for i in range(1, 4):
+        _,_, avgVals = loopedKfoldCVSetSplits(model, 5, fileNameTrain, 'NP',  f"{title}_{model}_{i}")
         avgVals['Model'] = model
         avgVals['Descriptor'] = 'N/A'
         avgVals['Index'] = i

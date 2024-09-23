@@ -2,12 +2,13 @@
 
 
 import numpy as np
+import pandas as pd
 import torch
 import chemprop
 from lightning import pytorch as pl
 import math
 import matplotlib.pyplot as plt
-from pl.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping
 
 # ========== #
 # PyTorch NN #
@@ -57,7 +58,8 @@ class SimpleNN(torch.nn.Module):
             X_val=None, y_val=None, 
             n_epochs=40, 
             batch_size=100, 
-            verbose=True):
+            verbose=True,
+            saveLoss = "torch_loss.csv"):
         loss_fn = torch.nn.MSELoss()  # mean square error
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.0001)
     
@@ -69,7 +71,7 @@ class SimpleNN(torch.nn.Module):
                                   batch_size=batch_size, 
                                   shuffle=True)
         
-        patience = 5
+        patience = 10
         best_loss = float('inf')
         counter = 0
 
@@ -114,7 +116,11 @@ class SimpleNN(torch.nn.Module):
 
             if verbose:
                 print(f'Epoch: {epoch:4d}, Loss: {epoch_loss:.3f}')
-    
+        
+        if (saveLoss != ''):
+            lossResults = pd.DataFrame(data = zip(self.training_loss, self.validation_loss), columns = ["Training Loss", "Validation Loss"])
+            lossResults.to_csv(saveLoss)
+
     def predict(self, X):
         X = torch.tensor(X, dtype=torch.float32)
         y_pred = self.forward(X).detach().numpy()
@@ -159,7 +165,7 @@ class ChempropModel():
         
         early_stopping = EarlyStopping(
                 monitor = 'val_loss',
-                patience = 5,
+                patience = 10,
                 mode = 'min',
                 verbose = True
                 )
@@ -178,9 +184,10 @@ class ChempropModel():
 
     def fit(self,
             train_loader,
+            val_loader,
             *args,
             **kwargs):
-        self.trainer.fit(self.mpnn, train_loader)
+        self.trainer.fit(self.mpnn, train_loader, val_loader)
 
     def predict(self,
                 test_loader):
