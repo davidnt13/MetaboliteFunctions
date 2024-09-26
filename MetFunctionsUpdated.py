@@ -311,7 +311,7 @@ def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor 
 
     return myPreds, predictionStats, avg_row
 
-def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributor = None):
+def loopedKfoldCVSetSplits(modelType, desc, fileName, group, title, distributor = None):
     dfTrain = pd.read_csv(fileName)
     
     if (group == 'NP'):
@@ -320,14 +320,17 @@ def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributo
     elif (group == 'NonNP'):
      #   dfTrain = df.loc(df["natural_product"] == "FALSE")
         fold_columns = [col for col in dfTrain.columns if 'train-nonNP' in col]
-    
+    elif (group == 'Mix'):
+        fold_columns = [col for col in dfTrain.columns if 'stratified' in col]
+
     train_X = dfTrain["SMILES"]
     train_y = dfTrain["pIC50"]
 
     predictions_filename = f'{title}: CV{modelType}_predictions.csv'
 
     predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
-    predictionStats = pd.DataFrame(data=np.zeros((num_cv, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])
+    predictionStats = {"NP": pd.DataFrame(data=np.zeros((5, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep']), "NonNP": pd.DataFrame(data=np.zeros((5, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])}
+    #predictionStats = pd.DataFrame(data=np.zeros((num_cv, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])
 
     myPreds = pd.DataFrame(index=range(len(train_y)), #index=train_y.index,
                            columns=['Prediction', 'Fold'])
@@ -365,13 +368,29 @@ def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributo
                            )
         dataset.graph_kernel_type = 'graph'
 
+    if desc == "RDKit":
+        train_X = CalcRDKitDescriptors(fileName)
+    elif desc == "Morgan":
+        train_X = CalcMorganFingerprints(fileName)
+    elif desc == "Both":
+        train_X = calcBothDescriptors(fileName)
+    elif desc == "Coati":
+        train_X = calcCoati(fileName)
+
     for fold_number, fold_column in enumerate(fold_columns):
         
         train_idx = dfTrain[dfTrain[fold_column] == 'train'].index
-        test_idx = dfTrain[dfTrain[fold_column] == 'test'].index
+        test_idx_NP = dfTrain[dfTrain[fold_column] == 'test-NP'].index
+        test_idx_NonNP = dfTrain[dfTrain[fold_column] == 'test-nonNP'].index
         
+        test_idx = {"NP": dfTrain[dfTrain[fold_column] == 'test-NP'].index, "NonNP": dfTrain[dfTrain[fold_column] == 'test-nonNP'].index}
+
         y_train = train_y.iloc[train_idx]
-        y_test = train_y.iloc[test_idx]
+        y_test = {}
+        x_test = {}
+
+        for key in test_idx.keys:
+            y_test[key] = train_y.iloc[test_idx[key]] 
 
         model_opts = {}
         model_fit_opts = {}
@@ -379,8 +398,9 @@ def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributo
         if modelType == 'MGK':
             x_train = mgktools.data.split.get_data_from_index(dataset,
                                                               train_idx).X
-            x_test = mgktools.data.split.get_data_from_index(dataset,
-                                                             test_idx).X
+            for key in test_idx.keys:
+                x_test[key] = mgktools.data.split.get_data_from_index(dataset,
+                                                                test_idx[key]).X
             model_opts = {'kernel' : kernel_config.kernel,
                           'optimizer' : None,
                           'alpha' : 0.01,
@@ -388,18 +408,23 @@ def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributo
 
         elif modelType == 'chemprop':
             # Split data into training and test sets:
-            
-            train_data, val_data, test_data = \
+            test_data = {}
+
+            train_data, test_data["NP"], test_data["NonNP"] = \
             chemprop.data.split_data_by_indices(dataset,
                                                 train_indices=train_idx,
-                                                val_indices=None,
-                                                test_indices=test_idx
+                                                val_indices=test_idx["NP"],
+                                                test_indices=test_idx["NonNP"]
                                                )
 
             # Calculate features for molecules:
             featurizer = chemprop.featurizers.SimpleMoleculeMolGraphFeaturizer()
             train_dset = chemprop.data.MoleculeDataset(train_data, featurizer)
-            test_dset = chemprop.data.MoleculeDataset(test_data, featurizer)
+            
+            test_dset = {}
+
+            for key in test_idx.keys:
+                test_dset[key] = chemprop.data.MoleculeDataset(test_data[key], featurizer)
 
             # Scale y data based on training set:
             scaler = train_dset.normalize_targets()
@@ -407,19 +432,25 @@ def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributo
 
             # Set up dataloaders for feeding data into models:
             train_loader = chemprop.data.build_dataloader(train_dset)
-            test_loader = chemprop.data.build_dataloader(test_dset, shuffle=False)
+            for key in test_idx.keys:
+                test_loader[key] = chemprop.data.build_dataloader(test_dset[key], shuffle=False)
 
             # Make name consistent with non-chemprop models:
             x_train = train_loader
-            x_test = test_loader
+            
+            for key in test_idx.keys:
+                x_test[key] = test_loader[key]
 
         else:
             x_train = train_X.iloc[train_idx]
-            x_test = train_X.iloc[test_idx]
+            for key in test_idx.keys:
+                x_test[key] = train_X.iloc[test_idx[key]]
 
             scaler = StandardScaler()
             x_train = scaler.fit_transform(x_train)
-            x_test = scaler.transform(x_test)
+
+            for key in test_idx.keys:
+                x_test[key] = scaler.transform(x_test[key])
 
             if modelType == 'torchNN':
                 y_scaler = StandardScaler()
@@ -427,52 +458,61 @@ def loopedKfoldCVSetSplits(modelType, num_cv, fileName, group, title, distributo
                 # x_train = SimplePyTorchDataset(x_train, y_train)
                 # x_test = SimplePyTorchDataset(x_test, y_test)
                 model_opts = {'y_scaler' : y_scaler, 'input_size' : x_train.shape[1]}
-                model_fit_opts = {'X_val' : torch.tensor(x_test, dtype=torch.float32),
-                                  'y_val' : y_test
-                                 }
+                #model_fit_opts = {'X_val' : torch.tensor(x_test, dtype=torch.float32),
+                #                  'y_val' : y_test
+                #                 }
 
         model = modelTypes[modelType]
         model = model(**model_opts)
 
-        import pickle as pk
-        pk.dump(y_train, open('y_train.pk', "wb"))
+        #import pickle as pk
+        #pk.dump(y_train, open('y_train.pk', "wb"))
 
         # Train model
-        model.fit(x_train, y_train.squeeze(), **model_fit_opts)
+        model.fit(x_train, y_train, **model_fit_opts)
         # model.plot_training_loss()
+        
+        for key in test_idx.keys:
+             y_pred = model.predict(x_test[key])
 
-        y_pred = model.predict(x_test)
+             # Metrics calculations
+             r2 = r2_score(y_test[key[key]], y_pred)
+             rmsd = root_mean_squared_error(y_test[key], y_pred)
+             bias = np.mean(y_pred - y_test[key])
+             sdep = np.std(y_pred - y_test[key])
 
-        # Metrics calculations
-        r2 = r2_score(y_test, y_pred)
-        rmsd = root_mean_squared_error(y_test, y_pred)
-        bias = np.mean(y_pred - y_test)
-        sdep = np.std(y_pred - y_test)
+             # Update stats
+             predStats['r2_sum'] += r2
+             predStats['rmsd_sum'] += rmsd
+             predStats['bias_sum'] += bias
+             predStats['sdep_sum'] += sdep
 
-        # Update stats
-        predStats['r2_sum'] += r2
-        predStats['rmsd_sum'] += rmsd
-        predStats['bias_sum'] += bias
-        predStats['sdep_sum'] += sdep
+             # Update predictions
+             #myPreds.loc[test_idx, 'Prediction'] = y_pred
+             #myPreds.loc[test_idx, 'Fold'] = fold_number + 1
 
-        # Update predictions
-        myPreds.loc[test_idx, 'Prediction'] = y_pred
-        myPreds.loc[test_idx, 'Fold'] = fold_number + 1
-
-        # Ensure correct number of values are assigned
-        predictionStats.iloc[fold_number] = [fold_number + 1, len(test_idx), r2, rmsd, bias, sdep]
+             # Ensure correct number of values are assigned
+             predictionStats[key].iloc[fold_number] = [fold_number + 1, len(test_idx), r2, rmsd, bias, sdep]
 
     # Calculate averages
-    r2_av = predStats['r2_sum'] / num_cv
-    rmsd_av = predStats['rmsd_sum'] / num_cv
-    bias_av = predStats['bias_sum'] / num_cv
-    sdep_av = predStats['sdep_sum'] / num_cv
+    #r2_av = predStats['r2_sum'] / 5
+    #rmsd_av = predStats['rmsd_sum'] / 5
+    #bias_av = predStats['bias_sum'] / 5
+    #sdep_av = predStats['sdep_sum'] / 5
 
     # Create a DataFrame row for averages
-    avg_row = pd.DataFrame([['Average', len(train_y), r2_av, rmsd_av, bias_av, sdep_av]], columns=predictionStats.columns)
+    #avg_row = pd.DataFrame([['Average', len(train_y), r2_av, rmsd_av, bias_av, sdep_av]], columns=predictionStats.columns)
+    
+    #for key in test_idx.keys:
+        #predictionStats[key].mean(access=0)
+    
+    avg_row = []
+    myPreds = []
 
     # Append average row to the DataFrame
-    predictionStats = pd.concat([predictionStats, avg_row], ignore_index=True)
+    #predictionStats = pd.concat([predictionStats, avg_row], ignore_index=True)
+    
+    predictionStats = pd.concat([predictionStats["NP"], predictionStats["NonNP"]], ignore_index=True, keys = ["NP", "NonNP"])
 
     return myPreds, predictionStats, avg_row
 
@@ -873,14 +913,15 @@ def makeModelCVAvg2(fileNameTrain, fileNameTest, model, title, trainName, distri
         avgResults = pd.concat([avgResults, avgVals])
     return avgResults
 
-def modelCVSetTest(fileNameTrain, fileNameTest, model, title, trainName, distributor = None):
+def modelCVSetTest(fileName, desc, model, title, group, distributor = None):
     #train_X, train_y, test_X, test_y = makeTrainAndTestGraph(fileNameTrain, fileNameTest, 'pIC50')
     avgResults = pd.DataFrame(data= [], columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep', 'Model', 'Descriptor', 'Index', 'Train Set'])
-    for i in range(1, 4):
-        _,_, avgVals = loopedKfoldCVSetSplits(model, 5, fileNameTrain, 'NP',  f"{title}_{model}_{i}")
-        avgVals['Model'] = model
-        avgVals['Descriptor'] = 'N/A'
-        avgVals['Index'] = i
-        avgVals['Train Set'] = trainName
-        avgResults = pd.concat([avgResults, avgVals])
-    return avgResults
+   # for i in range(1, 4):
+   #     _,_, avgVals = loopedKfoldCVSetSplits(model, 5, fileNameTrain, 'NP',  f"{title}_{model}_{i}")
+   #     avgVals['Model'] = model
+   #     avgVals['Descriptor'] = 'N/A'
+   #     avgVals['Index'] = i
+   #     avgVals['Train Set'] = trainName
+   #     avgResults = pd.concat([avgResults, avgVals])
+    _, predStats, _ = loopedKfoldCVSetSplits(model, desc, fileName, group, title, distributor = None):
+    return predStats

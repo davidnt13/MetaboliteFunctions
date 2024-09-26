@@ -73,4 +73,5 @@ def calcCoati(fileName):
     df_coati[['coati_'+str(i) for i in range(256)]] = \
     [embed_smiles(smi, encoder, tokenizer).cpu().numpy() for smi in smiles]
 
-    return df_coati.join(df['pIC50'])
+    return df_coati
+    #return df_coati.join(df['pIC50'])
