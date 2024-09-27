@@ -1,0 +1,20 @@
+{
+	"dataset": {
+		"Acetyl": {
+			"NP": "../acetyl/Acetylcholinesterase_CHEMBL220_NP.csv",
+			"NonNP": "../acetyl/Acetylcholinesterase_CHEMBL220_nonNP.csv"
+		},
+		"Tyro": {
+			"NP": "../tyro/Protein-tyrosine_phosphatase_1B_CHEMBL335_NP.csv",
+			"NonNP": "../tyro/Protein-tyrosine_phosphatase_1B_CHEMBL335_nonNP.csv"
+		},
+		"Mono": {
+			"NP": "../mono/Monoamine_oxidase_A_CHEMBL1951_NP.csv",
+			"NonNP": "../mono/Monoamine_oxidase_A_CHEMBL1951_nonNP.csv"
+		},
+		"HERG": {
+			"NP": "HERG_CHEMBL240_defined_splits.csv",
+			"NonNP": "HERG_CHEMBL240_defined_splits.csv"
+		}
+	}
+}

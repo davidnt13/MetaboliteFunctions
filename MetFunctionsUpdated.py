@@ -389,7 +389,7 @@ def loopedKfoldCVSetSplits(modelType, desc, fileName, group, title, distributor 
         y_test = {}
         x_test = {}
 
-        for key in test_idx.keys:
+        for key in test_idx.keys():
             y_test[key] = train_y.iloc[test_idx[key]] 
 
         model_opts = {}
@@ -398,7 +398,7 @@ def loopedKfoldCVSetSplits(modelType, desc, fileName, group, title, distributor 
         if modelType == 'MGK':
             x_train = mgktools.data.split.get_data_from_index(dataset,
                                                               train_idx).X
-            for key in test_idx.keys:
+            for key in test_idx.keys():
                 x_test[key] = mgktools.data.split.get_data_from_index(dataset,
                                                                 test_idx[key]).X
             model_opts = {'kernel' : kernel_config.kernel,
@@ -423,7 +423,7 @@ def loopedKfoldCVSetSplits(modelType, desc, fileName, group, title, distributor 
             
             test_dset = {}
 
-            for key in test_idx.keys:
+            for key in test_idx.keys():
                 test_dset[key] = chemprop.data.MoleculeDataset(test_data[key], featurizer)
 
             # Scale y data based on training set:
@@ -432,24 +432,24 @@ def loopedKfoldCVSetSplits(modelType, desc, fileName, group, title, distributor 
 
             # Set up dataloaders for feeding data into models:
             train_loader = chemprop.data.build_dataloader(train_dset)
-            for key in test_idx.keys:
+            for key in test_idx.keys():
                 test_loader[key] = chemprop.data.build_dataloader(test_dset[key], shuffle=False)
 
             # Make name consistent with non-chemprop models:
             x_train = train_loader
             
-            for key in test_idx.keys:
+            for key in test_idx.keys():
                 x_test[key] = test_loader[key]
 
         else:
             x_train = train_X.iloc[train_idx]
-            for key in test_idx.keys:
+            for key in test_idx.keys():
                 x_test[key] = train_X.iloc[test_idx[key]]
 
             scaler = StandardScaler()
             x_train = scaler.fit_transform(x_train)
 
-            for key in test_idx.keys:
+            for key in test_idx.keys():
                 x_test[key] = scaler.transform(x_test[key])
 
             if modelType == 'torchNN':
@@ -472,7 +472,7 @@ def loopedKfoldCVSetSplits(modelType, desc, fileName, group, title, distributor 
         model.fit(x_train, y_train, **model_fit_opts)
         # model.plot_training_loss()
         
-        for key in test_idx.keys:
+        for key in test_idx.keys():
              y_pred = model.predict(x_test[key])
 
              # Metrics calculations
@@ -923,5 +923,5 @@ def modelCVSetTest(fileName, desc, model, title, group, distributor = None):
    #     avgVals['Index'] = i
    #     avgVals['Train Set'] = trainName
    #     avgResults = pd.concat([avgResults, avgVals])
-    _, predStats, _ = loopedKfoldCVSetSplits(model, desc, fileName, group, title, distributor = None):
+    _, predStats, _ = loopedKfoldCVSetSplits(model, desc, fileName, group, title, distributor = None)
     return predStats
