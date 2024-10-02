@@ -1,0 +1,19 @@
+{
+	"datasets": {
+		"Alpha-2b": {
+			"filename" : "Alpha-2b_adrenergic_receptor_CHEMBL1942_defined_splits.csv",
+			"splits" : ["train-NP", "train-nonNP", "train-stratifiedNP"]
+		}
+	},
+	"models": {
+		"RF": {
+			"descriptors": ["RDKit", "Morgan", "Both", "Coati"]
+		},
+		"torchNN": {
+			"descriptors": ["RDKit"]
+		},
+		"chemprop": {
+			"descriptors": [""]
+		}
+	}
+}
