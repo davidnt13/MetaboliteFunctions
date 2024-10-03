@@ -103,16 +103,16 @@ class SimpleNN(torch.nn.Module):
                                y_val_scaled)
                 self.validation_loss.append(loss.item())
             
-            if val_loss.item() < best_loss:
-                best_loss = val_loss.item()
-                counter = 0  # Reset patience counter if validation loss improves
-            else:
-                counter += 1  # Increment counter if no improvement
+                if val_loss.item() < best_loss:
+                    best_loss = val_loss.item()
+                    counter = 0  # Reset patience counter if validation loss improves
+                else:
+                    counter += 1  # Increment counter if no improvement
 
-            # If patience limit is reached, stop training
-            if counter >= patience:
-                print(f"Early stopping at epoch {epoch} due to no improvement.")
-                break
+                # If patience limit is reached, stop training
+                if counter >= patience:
+                    print(f"Early stopping at epoch {epoch} due to no improvement.")
+                    break
 
             if verbose:
                 print(f'Epoch: {epoch:4d}, Loss: {epoch_loss:.3f}')
@@ -146,7 +146,7 @@ class ChempropModel():
 
     def __init__(self,
                  y_scaler=None,
-                 max_epochs=20,
+                 max_epochs=40,
                  **kwargs):
 
         # Set up model:
@@ -179,15 +179,15 @@ class ChempropModel():
                                   accelerator="auto",
                                   devices=1,
                                   max_epochs=max_epochs,
-                                  callbacks = [early_stopping]
+                                  #callbacks = [early_stopping]
                                  )
 
     def fit(self,
             train_loader,
-            val_loader,
+            #val_loader=None,
             *args,
             **kwargs):
-        self.trainer.fit(self.mpnn, train_loader, val_loader)
+        self.trainer.fit(self.mpnn, train_loader) #, val_loader)
 
     def predict(self,
                 test_loader):
