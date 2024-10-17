@@ -474,10 +474,12 @@ def loopedKfoldCV(modelType,
     # = JC: Removed number of fold from predictionStats as the DataFrame index 
     # can be used to label the fold.
     predictionStats = None
-    empty_predictionStats = pd.DataFrame(data=np.zeros((n_splits, 5)), 
-                                   columns=['Number of Molecules', 
-                                            'r2', 'rmsd', 'bias', 'sdep'], 
-                                   index=range(n_splits))
+    empty_predictionStats = pd.DataFrame(data=np.zeros((n_splits, 7)), 
+                                   columns=['Train Set Size', 
+                                            'Number of Molecules', 
+                                            'r2', 'rmsd', 'bias', 
+                                            'sdep', 'Test Set stdev'], 
+                                   index=range(1, n_splits+1))
     empty_predictionStats.index.name = 'Fold'
 
     myPreds = None
@@ -485,6 +487,7 @@ def loopedKfoldCV(modelType,
                            columns=['Prediction', 'Fold'])
     empty_myPreds['Prediction'] = np.nan
     empty_myPreds['Fold'] = np.nan
+    
 
     if modelType == 'chemprop':
         dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
@@ -621,7 +624,9 @@ def loopedKfoldCV(modelType,
         # Train model:
         model.fit(x_train, y_train, **model_fit_opts)
         # model.plot_training_loss()
-       
+        
+        sizeTrain = len(x_train)
+
         # Analyse performance on each test set:
         for key in test_idx.keys():
              y_pred = model.predict(x_test[key])
@@ -631,7 +636,8 @@ def loopedKfoldCV(modelType,
              rmsd = root_mean_squared_error(y_test[key], y_pred)
              bias = np.mean(y_pred - y_test[key])
              sdep = np.std(y_pred - y_test[key])
-
+             
+             stdev = np.std(y_test[key])
              # = JC: Don't need to store these sums anymore if the metrics for 
              # each fold are also being stored.
              # Update stats
@@ -645,8 +651,9 @@ def loopedKfoldCV(modelType,
              myPreds[key].loc[test_idx[key], 'Fold'] = fold_number + 1
 
              # Save prediction stats for this CV fold:
-             predictionStats[key].loc[fold_number] = [len(test_idx[key]), r2, 
-                                                      rmsd, bias, sdep]
+             predictionStats[key].loc[fold_number+1] = [sizeTrain,
+                                                        len(test_idx[key]), r2, 
+                                                        rmsd, bias, sdep, stdev]
 
     # = JC: As above, sums of metrics are no longer needed.
     # Calculate averages
@@ -658,9 +665,12 @@ def loopedKfoldCV(modelType,
     # Create a DataFrame row for averages
     predictionStats = pd.concat(predictionStats, axis=1)
     avg_row = predictionStats.mean(axis=0)
+    stdev_row = predictionStats.std(axis=0, ddof=0)
     avg_row.name = 'avg'
+    stdev_row.name= 'stdev'
 
-    predictionStats = pd.concat([predictionStats, avg_row.to_frame().T], axis=0)
+    predictionStats = pd.concat([predictionStats, avg_row.to_frame().T, 
+                                 stdev_row.to_frame().T], axis=0)
     #predictionStats = predictionStats.append(avg_row)
     #for key in test_idx.keys():
         #predictionStats[key].mean(access=0)
@@ -674,6 +684,7 @@ def loopedKfoldCV(modelType,
     # sets, the final dataframe will have a 2 layer header with the test set 
     # name as the first level:
     myPreds = pd.concat(myPreds, axis=1)
+    myPreds['Original Y'] = all_y
 
     return myPreds, predictionStats
 

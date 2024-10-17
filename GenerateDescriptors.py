@@ -20,6 +20,8 @@ from rdkit import Chem
 def CalcRDKitDescriptors(smiles_ls):
     mols = [Chem.MolFromSmiles(smi) for smi in smiles_ls]
     myDescriptors = [Descriptors.CalcMolDescriptors(mol) for mol in mols]
+    if 'Ipc' in myDescriptors.columns:
+        myDescriptors['Ipc'] = [Chem.GraphDescriptors.Ipc(mol, avg=True) for mol in mols]
     return pd.DataFrame(myDescriptors)
 
 # Calculating Morgan Fingerprints
