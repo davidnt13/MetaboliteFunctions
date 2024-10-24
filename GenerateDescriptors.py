@@ -19,10 +19,11 @@ from rdkit import Chem
 # more intuitive.
 def CalcRDKitDescriptors(smiles_ls):
     mols = [Chem.MolFromSmiles(smi) for smi in smiles_ls]
-    myDescriptors = [Descriptors.CalcMolDescriptors(mol) for mol in mols]
+    myDesc = [Descriptors.CalcMolDescriptors(mol) for mol in mols]
+    myDescriptors = pd.DataFrame(myDesc)
     if 'Ipc' in myDescriptors.columns:
         myDescriptors['Ipc'] = [Chem.GraphDescriptors.Ipc(mol, avg=True) for mol in mols]
-    return pd.DataFrame(myDescriptors)
+    return myDescriptors.dropna(axis = 1)
 
 # Calculating Morgan Fingerprints
 def morganHelper(smiles, radius=2, n_bits=1024):
