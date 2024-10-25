@@ -104,6 +104,17 @@ def calcCoati(smiles_ls):
     #                                   dontRemoveEverything=True)))
     #          for smi in smiles_ls]
 
+    # Check for any SMILES with multiple separate molecules/components and 
+    # return an error if found:
+    problem_smiles = []
+    for smi in smiles_ls:
+        if '.' in smi:
+            problem_smiles.append(smi)
+    if len(problem_smiles) > 0:
+        raise ValueError('SMILES: {} has a disconnection ("."), this '
+                         'cannot be used with COATI descriptors'.format(
+                         ', '.join(problem_smiles)))
+
     # Empty dataframe for saving COATI descriptors:
     df_coati = pd.DataFrame(data=np.zeros((len(smiles_ls), 256)),
                             columns=['coati_'+str(i) for i in range(256)],
