@@ -462,6 +462,14 @@ def loopedKfoldCV(modelType,
     # = JC: Renamed train_X/train_y to all_X/all_y for clarity:
     all_X = df_all_data["SMILES"]
     all_y = df_all_data["pIC50"]
+    # Get IDs for data points if ID column is present and check that they are 
+    # unique:
+    all_ids = df_all_data.get("ID")
+    if (all_ids is not None) and (all_ids.duplicated().sum() > 0):
+        raise ValueError(
+            '"ID" column of dataset contains duplicate values: {}'.format(
+            ', '.join(all_ids.loc[all_ids.duplicated(keep=False)]\
+                             .astype(str).to_list())))
 
     #predictions_filename = f'{title}: CV{modelType}_predictions.csv'
 
@@ -684,7 +692,11 @@ def loopedKfoldCV(modelType,
     # sets, the final dataframe will have a 2 layer header with the test set 
     # name as the first level:
     myPreds = pd.concat(myPreds, axis=1)
-    myPreds['Original Y'] = all_y
+    # Add original y data to the beginning of the DataFrame:
+    myPreds.insert(0, 'Original Y', all_y)
+    #myPreds['Original Y'] = all_y
+    if all_ids is not None:
+        myPreds.insert(0, 'ID', all_ids)
 
     return myPreds, predictionStats
 

@@ -17,12 +17,31 @@ from rdkit import Chem
 #    smiles_strings = df['SMILES'].tolist()
 # = JC: I've renamed some of the variables in this function to make it a bit 
 # more intuitive.
-def CalcRDKitDescriptors(smiles_ls):
+def CalcRDKitDescriptors(smiles_ls, verbose=True):
     mols = [Chem.MolFromSmiles(smi) for smi in smiles_ls]
     myDesc = [Descriptors.CalcMolDescriptors(mol) for mol in mols]
     myDescriptors = pd.DataFrame(myDesc)
     if 'Ipc' in myDescriptors.columns:
-        myDescriptors['Ipc'] = [Chem.GraphDescriptors.Ipc(mol, avg=True) for mol in mols]
+        myDescriptors['Ipc'] = [Chem.GraphDescriptors.Ipc(mol, avg=True) 
+                                if mol is not None else None for mol in mols]
+    # Check for any molecules with all NaN values in the DataFrame and return 
+    # an error if found:
+    if myDescriptors.isna().all(axis=1).any():
+        raise ValueError(
+            'All RDKit descriptors are NaN for molecule(s): {}'.format(
+            ', '.join([smiles_ls[i] 
+                       for i, v in enumerate(myDescriptors.isna().all(axis=1)) 
+                       if v])))
+    # Optionally print out a message about any descriptors which have NaN 
+    # values for any molecule(s):
+    if verbose:
+        if myDescriptors.isna().any(axis=None):
+            print('RDKit descriptor(s): {} contain NaN for some or all '
+                  'molecule(s): {}'.format(
+                  ', '.join(df.columns[df.isna().any(axis=0)]),
+                  ', '.join([smiles_ls[i] 
+                             for i, v in enumerate(df.isna().any(axis=1)) 
+                             if v])))
     return myDescriptors.dropna(axis = 1)
 
 # Calculating Morgan Fingerprints
@@ -38,7 +57,14 @@ def morganHelper(smiles, radius=2, n_bits=1024):
 def CalcMorganFingerprints(smiles_ls):
     df = pd.DataFrame(data=smiles_ls, columns=['SMILES'])
     df['MorganFingerprint'] = df['SMILES'].apply(morganHelper)
-    df = df.dropna(subset=['MorganFingerprint'])
+    # = JC: Don't drop rows containing NaN here as this will return a shorter 
+    # DataFrame and will disrupt the link between X and y data, instead raise 
+    # an error if any rows contain NaN.
+    # df = df.dropna(subset=['MorganFingerprint'])
+    if df['MorganFingerprint'].isna().any():
+        raise ValueError(
+            'Morgan fingerprint is NaN for molecule(s): {}'.format(
+            ', '.join(df['SMILES'].loc[df['MorganFingerprint'].isna()])))
     return pd.DataFrame(df['MorganFingerprint'].tolist())
 
 # Calculating Both RDkit Descriptors and Morgan Fingerprints
@@ -77,6 +103,17 @@ def calcCoati(smiles_ls):
     #                      Chem.MolFromSmiles(smi),
     #                                   dontRemoveEverything=True)))
     #          for smi in smiles_ls]
+
+    # Check for any SMILES with multiple separate molecules/components and 
+    # return an error if found:
+    problem_smiles = []
+    for smi in smiles_ls:
+        if '.' in smi:
+            problem_smiles.append(smi)
+    if len(problem_smiles) > 0:
+        raise ValueError('SMILES: {} has a disconnection ("."), this '
+                         'cannot be used with COATI descriptors'.format(
+                         ', '.join(problem_smiles)))
 
     # Empty dataframe for saving COATI descriptors:
     df_coati = pd.DataFrame(data=np.zeros((len(smiles_ls), 256)),
