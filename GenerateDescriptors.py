@@ -38,9 +38,9 @@ def CalcRDKitDescriptors(smiles_ls, verbose=True):
         if myDescriptors.isna().any(axis=None):
             print('RDKit descriptor(s): {} contain NaN for some or all '
                   'molecule(s): {}'.format(
-                  ', '.join(df.columns[df.isna().any(axis=0)]),
+                  ', '.join(myDescriptors.columns[myDescriptors.isna().any(axis=0)]),
                   ', '.join([smiles_ls[i] 
-                             for i, v in enumerate(df.isna().any(axis=1)) 
+                             for i, v in enumerate(myDescriptors.isna().any(axis=1)) 
                              if v])))
     return myDescriptors.dropna(axis = 1)
 

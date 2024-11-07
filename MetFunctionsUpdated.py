@@ -442,7 +442,9 @@ def loopedKfoldCV(modelType,
                   split_method='k-fold',
                   n_splits=5,
                   split_columns=[],
-                  frac_test=None):
+                  frac_test=None,
+                  subsample='',
+                  subsampleProportion=1):
 
     # = JC: Renamed dfTrain to df_all_data for clarity, to distinguish it from 
     # the training set.
@@ -537,6 +539,15 @@ def loopedKfoldCV(modelType,
 
     # Loop over dataset splits:
     for fold_number, [train_idx, test_idx] in enumerate(splitter):
+        
+        if subsample == 'random':
+            train_idx = np.random.choice(train_idx, size = int(len(train_idx)*subsampleProportion), replace = False)
+        elif subsample == 'stratified':
+            stratCol = df_all_data['natural_product']
+            newtrain_idx = []
+            for val in stratCol.unique():
+                newtrain_idx += np.random.choice(train_idx[stratCol == val], size = int(len(train_idx[stratCol==val])*subsampleProportion), replace = False)
+            train_idx = newtrain_idx
 
         # On the first loop, set up myPreds and predictionStats for each test 
         # set:
