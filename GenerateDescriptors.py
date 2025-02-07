@@ -44,6 +44,46 @@ def CalcRDKitDescriptors(smiles_ls, verbose=True):
                              if v])))
     return myDescriptors.dropna(axis = 1)
 
+def CalcRDKitChemprop(smiles_ls):
+    # Convert SMILES to RDKit Mol objects
+    mols = [Chem.MolFromSmiles(smi) for smi in smiles_ls]
+
+    # Compute descriptors for each molecule
+    myDesc = []
+    for mol in mols:
+        if mol is not None:  # Only process valid molecules
+            try:
+                desc = Descriptors.CalcMolDescriptors(mol)
+                # Make sure it's a list or array, if not, wrap it in a list
+                if isinstance(desc, tuple):
+                    desc = list(desc)  # Ensure it's a list if tuple
+                myDesc.append(desc)
+            except Exception as e:
+                print(f"Error processing molecule: {e}")
+                pass  # Skip molecules that fail descriptor computation
+
+    if not myDesc:
+        raise ValueError("No valid molecular descriptors computed.")
+
+    # Convert list of descriptors to NumPy array
+    descriptor_array = np.array(myDesc)
+
+    # Handle cases where only one descriptor is computed (1D array case)
+    if descriptor_array.ndim == 1:  # If it's a 1D array, make it 2D
+        descriptor_array = descriptor_array.reshape(1, -1)
+    
+    descriptor_array = np.nan_to_num(descriptor_array)
+
+    return descriptor_array
+
+#def CalcRDKitChemprop(smiles_ls):
+#    mols = [Chem.MolFromSmiles(smi) for smi in smiles_ls]
+#    myDesc = [Descriptors.CalcMolDescriptors(mol) for mol in mols]
+#
+#    descriptor_array = np.array(myDesc)
+#    descriptor_array = np.nan_to_num(descriptor_array)  # Replace NaNs with zeros
+#    return descriptor_array
+
 # Calculating Morgan Fingerprints
 def morganHelper(smiles, radius=2, n_bits=1024):
     mol = Chem.MolFromSmiles(smiles)

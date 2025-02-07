@@ -44,6 +44,7 @@ if use_mgk != "TRUE":
     try:
         import chemprop
         from models import SimpleNN, ChempropModel
+        #from chemprop.featurizers.molecule import RDKit2DFeaturizer
         modelTypes['torchNN'] = SimpleNN
         modelTypes['chemprop'] = ChempropModel
     except ModuleNotFoundError:
@@ -163,160 +164,6 @@ def plotCVResults(train_y, myPreds, title = None):
     ax.set_aspect('equal')
     ax.set_title(f'{title}: CV Model Results')
     plt.savefig(f'{title}: CV_modelResults.png')
-
-# = JC: No longer need separate loopedKfold... functions for different splits, 
-# as the loopedKfoldCV function can now handle different split methods.
-# Looped Kfold CrossVal (NOT A MIXED SET)
-#def loopedKfoldCrossVal(modelType, num_cv, train_X, train_y, title, distributor = None):
-#
-#    predictions_filename = f'{title}: CV{modelType}_predictions.csv'
-#
-#    predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
-#    predictionStats = pd.DataFrame(data=np.zeros((num_cv, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])
-#
-#    myPreds = pd.DataFrame(index=range(len(train_y)), #index=train_y.index,
-#                           columns=['Prediction', 'Fold'])
-#    myPreds['Prediction'] = np.nan
-#    myPreds['Fold'] = np.nan
-#
-#    if distributor is None:
-#        train_test_split = KFold(n_splits = num_cv, shuffle=True, random_state=1)
-#    else:
-#        train_test_split = StratifiedKFold(n_splits = num_cv, shuffle = True, random_state = 1)
-#
-#    if modelType == 'chemprop':
-#        dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
-#                   for smi, y in zip(train_X.loc[:,'SMILES'], train_y)]
-#
-#    elif modelType == 'MGK':
-#        #if isinstance(train_y, pd.Series):
-#         #   train_y = train_y.to_frame(name='Target')  # Convert Series to DataFrame
-#        #else:
-#         #   train_y = train_y.rename(columns={train_y.columns[0]: 'Target'})
-#        dataset = mgktools.data.data.Dataset.from_df(
-#                      pd.concat([train_X, train_y], axis=1).reset_index(),
-#                      pure_columns=[train_X.name],
-#                      #pure_columns=['Mol'],
-#                      #target_columns=['Target'],
-#                      target_columns=[train_y.name],
-#                      n_jobs=-1
-#                     )
-#        kernel_config = mgktools.kernels.utils.get_kernel_config(
-#                            dataset,
-#                            graph_kernel_type='graph',
-#                            # Arguments for marginalized graph kernel:
-#                            mgk_hyperparameters_files=[
-#                                mgktools.hyperparameters.product_msnorm],
-#                           )
-#        dataset.graph_kernel_type = 'graph'
-#
-#    for n, (train_idx, test_idx) in enumerate(train_test_split.split(train_X, distributor)):
-#
-#        y_train = train_y.iloc[train_idx]
-#        y_test = train_y.iloc[test_idx]
-#
-#        model_opts = {}
-#        model_fit_opts = {}
-#
-#        if modelType == 'MGK':
-#            x_train = mgktools.data.split.get_data_from_index(dataset,
-#                                                              train_idx).X
-#            x_test = mgktools.data.split.get_data_from_index(dataset,
-#                                                             test_idx).X
-#            model_opts = {'kernel' : kernel_config.kernel,
-#                          'optimizer' : None,
-#                          'alpha' : 0.01,
-#                          'normalize_y' : True}
-#
-#        elif modelType == 'chemprop':
-#            # Split data into training and test sets:
-#            train_idx, val_idx, _ = make_split_indices(train_idx, sizes=(0.9, 0.1, 0))
-#            train_data, val_data, test_data = \
-#            chemprop.data.split_data_by_indices(dataset,
-#                                                train_indices=train_idx,
-#                                                val_indices=None,
-#                                                test_indices=test_idx
-#                                               )
-#
-#            # Calculate features for molecules:
-#            featurizer = chemprop.featurizers.SimpleMoleculeMolGraphFeaturizer()
-#            train_dset = chemprop.data.MoleculeDataset(train_data, featurizer)
-#            test_dset = chemprop.data.MoleculeDataset(test_data, featurizer)
-#
-#            # Scale y data based on training set:
-#            scaler = train_dset.normalize_targets()
-#            model_opts = {'y_scaler' : scaler}
-#
-#            # Set up dataloaders for feeding data into models:
-#            train_loader = chemprop.data.build_dataloader(train_dset)
-#            test_loader = chemprop.data.build_dataloader(test_dset, shuffle=False)
-#
-#            # Make name consistent with non-chemprop models:
-#            x_train = train_loader
-#            x_test = test_loader
-#
-#        else:
-#            x_train = train_X.iloc[train_idx]
-#            x_test = train_X.iloc[test_idx]
-#
-#            scaler = StandardScaler()
-#            x_train = scaler.fit_transform(x_train)
-#            x_test = scaler.transform(x_test)
-#
-#            if modelType == 'torchNN':
-#                y_scaler = StandardScaler()
-#                y_train = y_scaler.fit_transform(np.array(y_train).reshape(-1, 1))
-#                # x_train = SimplePyTorchDataset(x_train, y_train)
-#                # x_test = SimplePyTorchDataset(x_test, y_test)
-#                model_opts = {'y_scaler' : y_scaler, 'input_size' : x_train.shape[1]}
-#                model_fit_opts = {'X_val' : torch.tensor(x_test, dtype=torch.float32),
-#                                  'y_val' : y_test
-#                                 }
-#
-#        model = modelTypes[modelType]
-#        model = model(**model_opts)
-#        
-#        import pickle as pk
-#        pk.dump(y_train, open('y_train.pk', "wb"))
-#
-#        # Train model
-#        model.fit(x_train, y_train.squeeze(), **model_fit_opts)
-#        # model.plot_training_loss()
-#
-#        y_pred = model.predict(x_test)
-#
-#        # Metrics calculations
-#        r2 = r2_score(y_test, y_pred)
-#        rmsd = root_mean_squared_error(y_test, y_pred)
-#        bias = np.mean(y_pred - y_test)
-#        sdep = np.std(y_pred - y_test)
-#
-#        # Update stats
-#        predStats['r2_sum'] += r2
-#        predStats['rmsd_sum'] += rmsd
-#        predStats['bias_sum'] += bias
-#        predStats['sdep_sum'] += sdep
-#
-#        # Update predictions
-#        myPreds.loc[test_idx, 'Prediction'] = y_pred
-#        myPreds.loc[test_idx, 'Fold'] = n + 1
-#
-#        # Ensure correct number of values are assigned
-#        predictionStats.iloc[n] = [n + 1, len(test_idx), r2, rmsd, bias, sdep]
-#
-#    # Calculate averages
-#    r2_av = predStats['r2_sum'] / num_cv
-#    rmsd_av = predStats['rmsd_sum'] / num_cv
-#    bias_av = predStats['bias_sum'] / num_cv
-#    sdep_av = predStats['sdep_sum'] / num_cv
-#
-#    # Create a DataFrame row for averages
-#    avg_row = pd.DataFrame([['Average', len(train_y), r2_av, rmsd_av, bias_av, sdep_av]], columns=predictionStats.columns)
-#
-#    # Append average row to the DataFrame
-#    predictionStats = pd.concat([predictionStats, avg_row], ignore_index=True)
-#
-#    return myPreds, predictionStats, avg_row
 
 # = JC: New function to set up dataset splits for different split methods 
 # (e.g. K-fold, stratified, predefined etc.), it returns a generator which 
@@ -444,7 +291,8 @@ def loopedKfoldCV(modelType,
                   split_columns=[],
                   frac_test=None,
                   subsample='',
-                  subsampleProportion=1):
+                  subsampleProportion=1,
+                  NPSubsamp=''):
 
     # = JC: Renamed dfTrain to df_all_data for clarity, to distinguish it from 
     # the training set.
@@ -500,7 +348,12 @@ def loopedKfoldCV(modelType,
     
 
     if modelType == 'chemprop':
-        dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y])
+        all_desc = CalcRDKitDescriptors(all_X)
+        all_desc.index = all_X
+        desc_size = all_desc.shape[1]
+        dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y],
+                   x_d = all_desc.loc[smi])
+                   #x_d = np.array([1, 1, 1]))
                    for smi, y in zip(all_X, all_y)]
 
     elif modelType == 'MGK':
@@ -543,10 +396,31 @@ def loopedKfoldCV(modelType,
         if subsample == 'random':
             train_idx = np.random.choice(train_idx, size = int(len(train_idx)*subsampleProportion), replace = False)
         elif subsample == 'stratified':
-            stratCol = df_all_data['natural_product']
-            newtrain_idx = []
+            stratCol = df_all_data['natural_product'].iloc[train_idx]
+            #print(len(stratCol))
+            #print(f'Train idx length: {len(train_idx)}')
+            train_idx_array = np.array(train_idx)
+            newtrain_idx = np.array([])
             for val in stratCol.unique():
-                newtrain_idx += np.random.choice(train_idx[stratCol == val], size = int(len(train_idx[stratCol==val])*subsampleProportion), replace = False)
+                selected_indices = train_idx_array[(stratCol == val).to_numpy()]
+                sampled_indices = np.random.choice(selected_indices, size=int(len(selected_indices) * subsampleProportion), replace = False)
+                newtrain_idx = np.concatenate((newtrain_idx, sampled_indices))
+                # newtrain_idx += np.random.choice(train_idx_array[stratCol == val], size = int(len(train_idx_array[stratCol==val])*subsampleProportion), replace = False)
+            train_idx = newtrain_idx
+        elif subsample == 'specific':
+            if NPSubsamp == 'NP':
+                val = True
+            else:
+                val = False
+            stratCol = df_all_data['natural_product'].iloc[train_idx]
+            train_idx_array = np.array(train_idx)
+            newtrain_idx = np.array([])
+            selected_indices = train_idx_array[(stratCol == val).to_numpy()]
+            print(f"Sample Prop: {subsampleProportion}")
+            print(f"Length selected: {len(selected_indices)}")
+            sampled_indices = np.random.choice(selected_indices, size=int(len(selected_indices) * subsampleProportion), replace = False)
+            rest_indices = np.array(train_idx_array[(stratCol != val).to_numpy()])
+            newtrain_idx = np.concatenate((sampled_indices, rest_indices))
             train_idx = newtrain_idx
 
         # On the first loop, set up myPreds and predictionStats for each test 
@@ -591,16 +465,20 @@ def loopedKfoldCV(modelType,
 
             # Calculate features for molecules:
             featurizer = chemprop.featurizers.SimpleMoleculeMolGraphFeaturizer()
+            #featurizer = chemprop.featurizers.VectorFeaturizer()
             train_dset = chemprop.data.MoleculeDataset(train_data, featurizer)
+            extra_desc_scaler = train_dset.normalize_inputs("X_d")
 
             test_dset = {}
             for key in test_idx.keys():
                 test_dset[key] = chemprop.data.MoleculeDataset(test_data[key], 
                                                                featurizer)
+                test_dset[key].normalize_inputs("X_d", extra_desc_scaler)
 
-            # Scale y data based on training set:
+            # Scale y data and extra descriptors based on training set:
             scaler = train_dset.normalize_targets()
-            model_opts = {'y_scaler' : scaler}
+            model_opts = {'y_scaler' : scaler,
+                          'desc_size': desc_size}
 
             # Set up dataloaders for feeding data into models:
             train_loader = chemprop.data.build_dataloader(train_dset)
@@ -717,159 +595,6 @@ def downloadCVStats(myPreds, predictionStats, title = None):
     myPreds.to_csv(predictions_filename, index=True)
     predictionStats.to_csv(f'{title}: CV_stats.csv', index=False)
 
-# = JC: No longer need separate loopedKfold... functions for different splits, 
-# as the loopedKfoldCVSetSplits function can now handle different split 
-# methods.
-# Looped Kfold CrossVal (MIXED SET)
-#def loopedKfoldCrossValMix(modelType, num_cv, train_X, train_y, title, distributor = None):
-#    predictions_filename = f'{title}: CV{modelType}_predictions.csv'
-#
-#    predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
-#    predictionStats = pd.DataFrame(data=np.zeros((num_cv, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])
-#
-#    myPreds = pd.DataFrame(index=range(len(train_y)), #index=train_y.index,
-#                           columns=['Prediction', 'Fold'])
-#    myPreds['Prediction'] = np.nan
-#    myPreds['Fold'] = np.nan
-#
-#    if distributor is None:
-#        train_test_split = KFold(n_splits = num_cv, shuffle=True, random_state=1)
-#    else:
-#        train_test_split = GroupKFold(n_splits = num_cv)
-#
-#    for n, (train_idx, test_idx) in enumerate(train_test_split.split(train_X, train_y, distributor)):
-#        x_train = train_X.iloc[train_idx]
-#        x_test = train_X.iloc[test_idx]
-#        y_train = train_y.iloc[train_idx]
-#        y_test = train_y.iloc[test_idx]
-#
-#        model = modelTypes[modelType]
-#
-#        # Train model
-#        model.fit(x_train, y_train)
-#
-#        y_pred = model.predict(x_test)
-#
-#        # Metrics calculations
-#        r2 = r2_score(y_test, y_pred)
-#        rmsd = mean_squared_error(y_test, y_pred, squared=False)
-#        bias = np.mean(y_pred - y_test)
-#        sdep = np.std(y_pred - y_test)
-#
-#        # Update stats
-#        predStats['r2_sum'] += r2
-#        predStats['rmsd_sum'] += rmsd
-#        predStats['bias_sum'] += bias
-#        predStats['sdep_sum'] += sdep
-#
-#        # Update predictions
-#        myPreds.loc[test_idx, 'Prediction'] = y_pred
-#        myPreds.loc[test_idx, 'Fold'] = n + 1
-#
-#        # Ensure correct number of values are assigned
-#        predictionStats.iloc[n] = [n + 1, len(test_idx), r2, rmsd, bias, sdep]
-#
-#    # Calculate averages
-#    r2_av = predStats['r2_sum'] / num_cv
-#    rmsd_av = predStats['rmsd_sum'] / num_cv
-#    bias_av = predStats['bias_sum'] / num_cv
-#    sdep_av = predStats['sdep_sum'] / num_cv
-#
-#    # Create a DataFrame row for averages
-#    avg_row = pd.DataFrame([['Average', len(train_y), r2_av, rmsd_av, bias_av, sdep_av]], columns=predictionStats.columns)
-#
-#    # Append average row to the DataFrame
-#    predictionStats = pd.concat([predictionStats, avg_row], ignore_index=True)
-#
-#    return myPreds, predictionStats, avg_row
-
-# = JC: Don't think that this function is used anymore.
-# Mixed Set Cross Validation
-#def mixedCV(fileName, descr, model):
-#
-#    mixDf = pd.read_csv(fileName)
-#
-#    if descr == "RDKit":
-#        df2Mix = CalcRDKitDescriptors(fileName)
-#    elif descr == "Morgan":
-#        df2Mix = CalcMorganFingerprints(fileName)
-#    elif descr == "Both":
-#        df2Mix = calcBothDescriptors(fileName)
-#
-#    allMetabolites = mixDf["natural_product"].tolist()
-#    df2Mix["natural_product"] = allMetabolites
-#    train_X = df2Mix.dropna(axis = 1)
-#    train_y = mixDf.pIC50
-#    metabolites = mixDf.natural_product
-#    train_X = train_X.drop("natural_product", axis = 1)
-#
-#    for index in range(1, 4):
-#        loopedKfoldCrossVal(model, 10, train_X, train_y, f"Mixture_{model}_{descr}_{index}", metabolites)
-
-# = JC: Don't think that this function is used anymore.
-# Mixed Set Cross Validation (And Saving Results)
-#def mixedCVSaveAvg(fileName, descr, model):
-#
-#    mixDf = pd.read_csv(fileName)
-#
-#    if descr == "RDKit":
-#        df2Mix = CalcRDKitDescriptors(fileName)
-#    elif descr == "Morgan":
-#        df2Mix = CalcMorganFingerprints(fileName)
-#    elif descr == "Both":
-#        df2Mix = calcBothDescriptors(fileName)
-#
-#    allMetabolites = mixDf["natural_product"].tolist()
-#    df2Mix["natural_product"] = allMetabolites
-#    train_X = df2Mix.dropna(axis = 1)
-#    train_y = mixDf.pIC50
-#    metabolites = mixDf.natural_product
-#    train_X = train_X.drop("natural_product", axis = 1)
-#
-#    avgResults = pd.DataFrame(data= [], columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep', 'Model', 'Descriptor', 'Index'])
-#
-#    for index in range(1, 4):
-#        myPreds,_, avgVals = loopedKfoldCrossVal(model, 10, train_X, train_y, f"Mixture_{model}_{descr}_{index}", metabolites)
-#        avgVals['Model'] = model
-#        avgVals['Descriptor'] = descr
-#        avgVals['Index'] = index
-#        avgResults = pd.concat([avgResults, avgVals])
-#    plotCVResults(train_y, myPreds, f"Mixture_{model}_{descr}_{index}")
-#
-#    return avgResults
-
-# = JC: Don't think that this function is used anymore.
-# Mixed Scaffold Cross Validation (And Saving Results)
-#def mixedCVScaffSaveAvg(fileName, descr, model):
-#
-#    mixDf = pd.read_csv(fileName)
-#
-#    if descr == "RDKit":
-#        df2Mix = CalcRDKitDescriptors(fileName)
-#    elif descr == "Morgan":
-#        df2Mix = CalcMorganFingerprints(fileName)
-#    elif descr == "Both":
-#        df2Mix = calcBothDescriptors(fileName)
-#
-#    mixDf['scaffold'] = mixDf['SMILES'].apply(MurckoScaffoldSmiles)
-#
-#    allScaff = mixDf["scaffold"].tolist()
-#    df2Mix["scaffold"] = allScaff
-#    train_X = df2Mix.dropna(axis = 1)
-#    train_y = mixDf.pIC50
-#    scaffs = mixDf.scaffold
-#    train_X = train_X.drop("scaffold", axis = 1)
-#
-#    avgResults = pd.DataFrame(data= [], columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep', 'Model', 'Descriptor', 'Index'])
-#
-#    for index in range(1, 4):
-#        _,_, avgVals = loopedKfoldCrossValMix(model, 10, train_X, train_y, f"Mixture + {model} + {descr} + {index}", scaffs)
-#        avgVals['Model'] = model
-#        avgVals['Descriptor'] = descr
-#        avgVals['Index'] = index
-#        avgResults = pd.concat([avgResults, avgVals])
-#
-#    return avgResults
 
 # Creating Bar Chart for CV Splits
 def createSplitsBarChart(predictionStats, title):
@@ -1114,17 +839,3 @@ def makeModelCVAvg2(fileNameTrain, fileNameTest, model, title, trainName, distri
         avgResults = pd.concat([avgResults, avgVals])
     return avgResults
 
-# = JC: This function is no longer needed, since it just runs 
-# loopedKfoldCVSetSplits.
-#def modelCVSetTest(fileName, desc, model, title, group, distributor = None):
-#    #train_X, train_y, test_X, test_y = makeTrainAndTestGraph(fileNameTrain, fileNameTest, 'pIC50')
-#    avgResults = pd.DataFrame(data= [], columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep', 'Model', 'Descriptor', 'Index', 'Train Set'])
-#   # for i in range(1, 4):
-#   #     _,_, avgVals = loopedKfoldCVSetSplits(model, 5, fileNameTrain, 'NP',  f"{title}_{model}_{i}")
-#   #     avgVals['Model'] = model
-#   #     avgVals['Descriptor'] = 'N/A'
-#   #     avgVals['Index'] = i
-#   #     avgVals['Train Set'] = trainName
-#   #     avgResults = pd.concat([avgResults, avgVals])
-#    _, predStats, _ = loopedKfoldCVSetSplits(model, desc, fileName, group, title, distributor = None)
-#    return predStats
