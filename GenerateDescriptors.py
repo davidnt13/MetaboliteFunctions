@@ -7,16 +7,10 @@ import matplotlib.pyplot as plt
 from coati.generative.coati_purifications import embed_smiles
 from rdkit import Chem
 
-# = JC: I've modified all functions so that they take a list of SMILES rather 
-# than a filename, since these functions are called when the dataset file has 
-# already been read.
+# Imports for ChemBERTa
+from transformers import AutoTokenizer, AutoModel
+import deepchem as dc
 
-# Calculating RDKit Descriptors
-#def CalcRDKitDescriptors(fileName):
-#    df = pd.read_csv(fileName)
-#    smiles_strings = df['SMILES'].tolist()
-# = JC: I've renamed some of the variables in this function to make it a bit 
-# more intuitive.
 def CalcRDKitDescriptors(smiles_ls, verbose=True):
     mols = [Chem.MolFromSmiles(smi) for smi in smiles_ls]
     myDesc = [Descriptors.CalcMolDescriptors(mol) for mol in mols]
@@ -76,14 +70,6 @@ def CalcRDKitChemprop(smiles_ls):
 
     return descriptor_array
 
-#def CalcRDKitChemprop(smiles_ls):
-#    mols = [Chem.MolFromSmiles(smi) for smi in smiles_ls]
-#    myDesc = [Descriptors.CalcMolDescriptors(mol) for mol in mols]
-#
-#    descriptor_array = np.array(myDesc)
-#    descriptor_array = np.nan_to_num(descriptor_array)  # Replace NaNs with zeros
-#    return descriptor_array
-
 # Calculating Morgan Fingerprints
 def morganHelper(smiles, radius=2, n_bits=1024):
     mol = Chem.MolFromSmiles(smiles)
@@ -97,10 +83,6 @@ def morganHelper(smiles, radius=2, n_bits=1024):
 def CalcMorganFingerprints(smiles_ls):
     df = pd.DataFrame(data=smiles_ls, columns=['SMILES'])
     df['MorganFingerprint'] = df['SMILES'].apply(morganHelper)
-    # = JC: Don't drop rows containing NaN here as this will return a shorter 
-    # DataFrame and will disrupt the link between X and y data, instead raise 
-    # an error if any rows contain NaN.
-    # df = df.dropna(subset=['MorganFingerprint'])
     if df['MorganFingerprint'].isna().any():
         raise ValueError(
             'Morgan fingerprint is NaN for molecule(s): {}'.format(
@@ -129,23 +111,6 @@ encoder, tokenizer = load_e3gnn_smiles_clip_e2e(
     doc_url="s3://terray-public/models/barlow_closed.pkl",
 )
 def calcCoati(smiles_ls):
-    #df = pd.read_csv(fileName)\
-    #       .set_index('ChEMBL_ID', verify_integrity=True)
-
-    # = JC: I put this in to catch errors with the last datasets where there 
-    # were some molecules with multiple components, but hopefully these 
-    # molecules should have been removed from the improved datasets.
-    # Have to remove any SMILES with multiple separate molecules/components
-    # (these should be removed from the final dataset anyway)
-    #smiles = [Chem.MolToSmiles(
-    #              Chem.MolStandardize.rdMolStandardize.FragmentParent(
-    #                  remover.StripMol(
-    #                      Chem.MolFromSmiles(smi),
-    #                                   dontRemoveEverything=True)))
-    #          for smi in smiles_ls]
-
-    # Check for any SMILES with multiple separate molecules/components and 
-    # return an error if found:
     problem_smiles = []
     for smi in smiles_ls:
         if '.' in smi:
@@ -166,3 +131,25 @@ def calcCoati(smiles_ls):
     [embed_smiles(smi, encoder, tokenizer).cpu().numpy() for smi in smiles_ls]
 
     return df_coati
+
+# Calculating ChemBerta
+tokenizer = AutoTokenizer.from_pretrained("seyonec/ChemBERTa-zinc-base-v1")
+model = AutoModel.from_pretrained("seyonec/ChemBERTa-zinc-base-v1")
+
+def calcChemBert(smiles_list, batch_size=8):
+    embeddings = []
+    smiles_list = [str(s) for s in smiles_list if isinstance(s, str) and s.strip()]
+    # Ensure there are valid SMILES
+    if not smiles_list:
+        raise ValueError("No valid SMILES found in input!")
+    for i in range(0, len(smiles_list), batch_size):
+        batch = smiles_list[i : i + batch_size]
+        inputs = tokenizer(batch, padding=True, truncation=True, return_tensors="pt")
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        batch_embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+        embeddings.extend(batch_embeddings)
+
+    return pd.DataFrame(embeddings)

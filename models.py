@@ -146,6 +146,7 @@ class ChempropModel():
 
     def __init__(self,
                  y_scaler=None,
+                 xd_size=0,
                  max_epochs=40,
                  **kwargs):
 
@@ -158,7 +159,7 @@ class ChempropModel():
                 chemprop.nn.UnscaleTransform.from_standard_scaler(y_scaler)
         else:
             output_transform = None
-        ffn = chemprop.nn.RegressionFFN(input_dim=mp.output_dim+desc_size, output_transform=output_transform)
+        ffn = chemprop.nn.RegressionFFN(input_dim=mp.output_dim+xd_size, output_transform=output_transform)
         self.mpnn = chemprop.models.MPNN(mp, agg, ffn, 
                                          #batch_norm, metric_list)
                                          )

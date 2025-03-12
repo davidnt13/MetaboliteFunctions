@@ -37,9 +37,11 @@ if use_mgk != "TRUE":
     from sklearn.ensemble import RandomForestRegressor
     from xgboost import XGBRegressor
     from sklearn.svm import SVR
+    from sklearn.neighbors import KNeighborsRegressor
     modelTypes['RF'] = RandomForestRegressor
     modelTypes['XGBR'] = XGBRegressor
     modelTypes['SVR'] = SVR
+    modelTypes['KNN'] = KNeighborsRegressor
 
     try:
         import chemprop
@@ -63,84 +65,6 @@ else:
         modelTypes['MGKSVR'] = SVR
     except ModuleNotFoundError:
         print('WARNING: Cannot import mgktools python modules')
-
-# = JC: Commented out function below as no longer used in code.
-# Making Train and Test, in addition to Descriptors/Fingerprints
-#def makeTrainAndTestDesc(fileNameTrain, fileNameTest, target, desc):
-#    dfTrain = pd.read_csv(fileNameTrain)
-#    dfTest = pd.read_csv(fileNameTest)
-#
-#    if desc == "RDKit":
-#        descTrain = CalcRDKitDescriptors(fileNameTrain)
-#        descTest = CalcRDKitDescriptors(fileNameTest)
-#    elif desc == "Morgan":
-#        descTrain = CalcMorganFingerprints(fileNameTrain)
-#        descTest = CalcMorganFingerprints(fileNameTest)
-#    elif desc == "Both":
-#        descTrain = calcBothDescriptors(fileNameTrain)
-#        descTest = calcBothDescriptors(fileNameTest)
-#    elif desc == "Coati":
-#        descTrain = calcCoati(fileNameTrain)
-#        descTest = calcCoati(fileNameTest)
-#
-#    train_X = descTrain.dropna(axis = 1)
-#    train_y = dfTrain[target]
-#    test_X = descTest.dropna(axis = 1)
-#    test_y = dfTest[target]
-#
-#    common_columns = train_X.columns.intersection(test_X.columns)
-#    train_X = train_X[common_columns]
-#    test_X = test_X[common_columns]
-#
-#    return train_X, train_y, test_X, test_y
-
-# = JC: Commented out function below as no longer used in code.
-# Making Train and Test (Descriptors already in files)
-#def makeTrainAndTest(fileNameTrain, fileNameTest, target):
-#    dfTrain = pd.read_csv(fileNameTrain)
-#    dfTest = pd.read_csv(fileNameTest)
-#
-#    train_X = dfTrain.dropna(axis = 1)\
-#                    .drop(target)
-#    train_y = dfTrain[target]
-#    test_X = dfTest.dropna(axis = 1)\
-#                    .drop(target)
-#    test_y = dfTest[target]
-#
-#    common_columns = train_X.columns.intersection(test_X.columns)
-#    train_X = train_X[common_columns]
-#    test_X = test_X[common_columns]
-#
-#    return train_X, train_y, test_X, test_y
-
-# = JC: Commented out function below as no longer used in code.
-# Making Train and Test (For ChemProp, MGK)
-#def makeTrainAndTestGraph(fileNameTrain, fileNameTest, target):
-#    dfTrain = pd.read_csv(fileNameTrain)
-#    dfTest = pd.read_csv(fileNameTest)
-#    #train_X = dfTrain.dropna(axis = 0)\
-#     #               .reset_index()\
-#      #              .drop(target, axis = 1)\
-#       #             .drop("ChEMBL_ID", axis = 1)\
-#        #            .drop("natural_product", axis = 1)
-#    train_X = dfTrain['SMILES']
-#    train_y = dfTrain[target]
-#    #test_X = dfTest.dropna(axis = 0)\
-#    #                .reset_index()\
-#    #                .drop(target, axis = 1)\
-#    #                .drop("ChEMBL_ID", axis = 1)\
-#    #                .drop("natural_product", axis = 1)
-#    test_X = dfTest['SMILES']
-#    test_y = dfTest[target]
-#
-#    return train_X, train_y, test_X, test_y
-
-# = JC: Commented out function below as no longer used in code.
-#def makeTrainAndTestGraphCV(CVName, fileNameTrain, fileNameTest, target):
-#    df = pd.read_csv(fileNameTrain)
-#    dfTrain = df.loc(df["natural_product"] == "TRUE")
-#    dfTest = df.loc(df["natural_product"] == "FALSE")
-#    return dfTrain, dfTest
 
 # Plotting CV Results
 def plotCVResults(train_y, myPreds, title = None):
@@ -351,8 +275,10 @@ def loopedKfoldCV(modelType,
         all_desc = CalcRDKitDescriptors(all_X)
         all_desc.index = all_X
         desc_size = all_desc.shape[1]
+        print(all_desc.loc[all_X.iloc[0]].to_list())
+        print(all_desc.loc[all_X.iloc[0]])
         dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y],
-                   x_d = all_desc.loc[smi])
+                   x_d = all_desc.loc[smi].to_numpy())
                    #x_d = np.array([1, 1, 1]))
                    for smi, y in zip(all_X, all_y)]
 
@@ -382,6 +308,8 @@ def loopedKfoldCV(modelType,
             all_X = calcBothDescriptors(all_X)
         elif desc == "Coati":
             all_X = calcCoati(all_X)
+        elif desc == "ChemBert":
+            all_X = calcChemBert(all_X)
 
     # Generate the dataset splitter:
     splitter = get_dataset_splitter(df_all_data,
@@ -468,9 +396,20 @@ def loopedKfoldCV(modelType,
             #featurizer = chemprop.featurizers.VectorFeaturizer()
             train_dset = chemprop.data.MoleculeDataset(train_data, featurizer)
             extra_desc_scaler = train_dset.normalize_inputs("X_d")
+            
+            print(f"x_d size: {desc_size}")
 
             test_dset = {}
             for key in test_idx.keys():
+                for i, d in enumerate(test_data[key]):
+                    try:
+                        _ = np.array(d.x_d)  # Try converting to NumPy
+                        print(f"x_d type: {type(d.x_d)}")
+                        print(f"x_d length: {len(d.x_d)}")
+                    except ValueError as e:
+                        print(f"Problematic x_d at index {i}: {d.x_d} (Error: {e})")
+
+
                 test_dset[key] = chemprop.data.MoleculeDataset(test_data[key], 
                                                                featurizer)
                 test_dset[key].normalize_inputs("X_d", extra_desc_scaler)
@@ -478,7 +417,7 @@ def loopedKfoldCV(modelType,
             # Scale y data and extra descriptors based on training set:
             scaler = train_dset.normalize_targets()
             model_opts = {'y_scaler' : scaler,
-                          'desc_size': desc_size}
+                          'xd_size': desc_size}
 
             # Set up dataloaders for feeding data into models:
             train_loader = chemprop.data.build_dataloader(train_dset)
@@ -517,6 +456,25 @@ def loopedKfoldCV(modelType,
 
         model = modelTypes[modelType]
         model = model(**model_opts)
+        
+        if modelType == 'KNN':
+            from sklearn.model_selection import GridSearchCV
+            from sklearn.metrics import accuracy_score
+
+            X_train2, X_test2, y_train2, y_test2 = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
+
+            param_grid = {
+                'n_neighbors': [3, 5, 7, 9, 11],
+                'weights': ['uniform', 'distance'],
+                'p': [1, 2]  # 1 for Manhattan distance, 2 for Euclidean distance
+            }
+            knn_gsearch = KNeighborsRegressor()
+            grid_search = GridSearchCV(knn, param_grid, cv=5, scoring='accuracy')
+            grid_search.fit(X_train, y_train)
+            best_params = grid_search.best_params_
+            print("Best Parameters:", best_params)
+
+            model = KNeighborsRegressor(**best_params)
 
         # Train model:
         model.fit(x_train, y_train, **model_fit_opts)
