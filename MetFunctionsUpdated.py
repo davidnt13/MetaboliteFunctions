@@ -16,6 +16,7 @@ from rdkit.Chem.Scaffolds.MurckoScaffold import MurckoScaffoldSmiles
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, root_mean_squared_error
+from sklearn.metrics import matthews_corrcoef, recall_score, confusion_matrix
 import matplotlib.pyplot as plt
 
 from sklearn.model_selection import ShuffleSplit
@@ -202,13 +203,6 @@ def get_dataset_splitter(df_data,
 def loopedKfoldCV(modelType, 
                   desc, 
                   dataset_file, 
-                  # = JC: group argument no longer needed.
-                  #group, 
-                  #title, 
-                  # = JC: distributor argument no longer needed, I 
-                  # think this was the column for doing stratified 
-                  # splits, but I've renamed this strat_column.
-                  #distributor = None,
                   strat_column=None,
                   split_method='k-fold',
                   n_splits=5,
@@ -222,17 +216,6 @@ def loopedKfoldCV(modelType,
     # the training set.
     df_all_data = pd.read_csv(dataset_file)
     
-    # = JC: This is no longer needed since the fold columns are given as the 
-    # split_columns argument to the overall function.
-    #if (group == 'NP'):
-    # #   dfTrain = df.loc(df["natural_product"] == "TRUE")
-    #    fold_columns = [col for col in dfTrain.columns if 'train-NP' in col]
-    #elif (group == 'NonNP'):
-    # #   dfTrain = df.loc(df["natural_product"] == "FALSE")
-    #    fold_columns = [col for col in dfTrain.columns if 'train-nonNP' in col]
-    #elif (group == 'Mix'):
-    #    fold_columns = [col for col in dfTrain.columns if 'stratified' in col]
-
     # = JC: Renamed train_X/train_y to all_X/all_y for clarity:
     all_X = df_all_data["SMILES"]
     all_y = df_all_data["pIC50"]
@@ -245,16 +228,6 @@ def loopedKfoldCV(modelType,
             ', '.join(all_ids.loc[all_ids.duplicated(keep=False)]\
                              .astype(str).to_list())))
 
-    #predictions_filename = f'{title}: CV{modelType}_predictions.csv'
-
-    # =JC: Don't need to save sums of metrics if the values for each CV-fold 
-    # are also being saved.
-    #predStats = {'r2_sum': 0, 'rmsd_sum': 0, 'bias_sum': 0, 'sdep_sum': 0}
-
-    #predictionStats = {"NP": pd.DataFrame(data=np.zeros((5, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep']), "NonNP": pd.DataFrame(data=np.zeros((5, 6)), columns=['Fold', 'Number of Molecules', 'r2', 'rmsd', 'bias', 'sdep'])}
-
-    # = JC: Removed number of fold from predictionStats as the DataFrame index 
-    # can be used to label the fold.
     predictionStats = None
     empty_predictionStats = pd.DataFrame(data=np.zeros((n_splits, 7)), 
                                    columns=['Train Set Size', 
@@ -461,7 +434,7 @@ def loopedKfoldCV(modelType,
             from sklearn.model_selection import GridSearchCV
             from sklearn.metrics import accuracy_score
 
-            X_train2, X_test2, y_train2, y_test2 = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
+            X_train2, X_test2, y_train2, y_test2 = train_test_split(x_train, y_train, test_size=0.2, random_state=42)
 
             param_grid = {
                 'n_neighbors': [3, 5, 7, 9, 11],
@@ -469,8 +442,8 @@ def loopedKfoldCV(modelType,
                 'p': [1, 2]  # 1 for Manhattan distance, 2 for Euclidean distance
             }
             knn_gsearch = KNeighborsRegressor()
-            grid_search = GridSearchCV(knn, param_grid, cv=5, scoring='accuracy')
-            grid_search.fit(X_train, y_train)
+            grid_search = GridSearchCV(knn_gsearch, param_grid, cv=5, scoring='accuracy')
+            grid_search.fit(X_train2, y_train2)
             best_params = grid_search.best_params_
             print("Best Parameters:", best_params)
 
@@ -493,14 +466,7 @@ def loopedKfoldCV(modelType,
              sdep = np.std(y_pred - y_test[key])
              
              stdev = np.std(y_test[key])
-             # = JC: Don't need to store these sums anymore if the metrics for 
-             # each fold are also being stored.
-             # Update stats
-             #predStats['r2_sum'] += r2
-             #predStats['rmsd_sum'] += rmsd
-             #predStats['bias_sum'] += bias
-             #predStats['sdep_sum'] += sdep
-
+             
              # Update predictions
              myPreds[key].loc[test_idx[key], 'Prediction'] = y_pred
              myPreds[key].loc[test_idx[key], 'Fold'] = fold_number + 1
@@ -509,13 +475,6 @@ def loopedKfoldCV(modelType,
              predictionStats[key].loc[fold_number+1] = [sizeTrain,
                                                         len(test_idx[key]), r2, 
                                                         rmsd, bias, sdep, stdev]
-
-    # = JC: As above, sums of metrics are no longer needed.
-    # Calculate averages
-    #r2_av = predStats['r2_sum'] / 5
-    #rmsd_av = predStats['rmsd_sum'] / 5
-    #bias_av = predStats['bias_sum'] / 5
-    #sdep_av = predStats['sdep_sum'] / 5
 
     # Create a DataFrame row for averages
     predictionStats = pd.concat(predictionStats, axis=1)
@@ -526,14 +485,6 @@ def loopedKfoldCV(modelType,
 
     predictionStats = pd.concat([predictionStats, avg_row.to_frame().T, 
                                  stdev_row.to_frame().T], axis=0)
-    #predictionStats = predictionStats.append(avg_row)
-    #for key in test_idx.keys():
-        #predictionStats[key].mean(access=0)
-    
-    # Append average row to the DataFrame
-    #predictionStats = pd.concat([predictionStats, avg_row], ignore_index=True)
-    
-   #  predictionStats = pd.concat([predictionStats["NP"], predictionStats["NonNP"]], ignore_index=True, keys = ["NP", "NonNP"])
 
     # Concatenate the dataframes containing the predictions for different test 
     # sets, the final dataframe will have a 2 layer header with the test set 
@@ -546,6 +497,234 @@ def loopedKfoldCV(modelType,
         myPreds.insert(0, 'ID', all_ids)
 
     return myPreds, predictionStats
+
+def loopedKfoldCV_Classify(modelType, 
+                  desc, 
+                  dataset_file,
+                  strat_column=None,
+                  split_method='k-fold',
+                  n_splits=5,
+                  split_columns=[],
+                  frac_test=None,
+                  subsample='',
+                  subsampleProportion=1,
+                  NPSubsamp=''):
+    
+    df_all_data = pd.read_csv(dataset_file)
+    all_X = df_all_data["SMILES"]
+    all_y = df_all_data["pIC50"]  # should be binary (0 or 1) for classification
+    all_ids = df_all_data.get("ID")
+    
+    if (all_ids is not None) and (all_ids.duplicated().sum() > 0):
+        raise ValueError("Duplicate IDs found in dataset.")
+
+    predictionStats = None
+    empty_predictionStats = pd.DataFrame(data=np.zeros((n_splits, 5)), 
+                                   columns=['Train Set Size', 
+                                            'Number of Molecules', 
+                                            'MCC', 'Sensitivity', 
+                                            'Specificity'], 
+                                   index=range(1, n_splits+1))
+    empty_predictionStats.index.name = 'Fold'
+
+    myPreds = None
+    empty_myPreds = pd.DataFrame(index=range(len(all_y)),
+                           columns=['Prediction', 'Fold'])
+    empty_myPreds['Prediction'] = np.nan
+    empty_myPreds['Fold'] = np.nan
+
+    if modelType == 'chemprop':
+        all_desc = CalcRDKitDescriptors(all_X)
+        all_desc.index = all_X
+        dataset = [chemprop.data.MoleculeDatapoint.from_smi(smi, [y],
+                   x_d=all_desc.loc[smi].to_numpy())
+                   for smi, y in zip(all_X, all_y)]
+
+    elif modelType == 'MGK':
+        dataset = mgktools.data.data.Dataset.from_df(
+                      pd.concat([all_X, all_y], axis=1).reset_index(),
+                      pure_columns=[all_X.name],
+                      target_columns=[all_y.name],
+                      n_jobs=-1
+                     )
+        kernel_config = mgktools.kernels.utils.get_kernel_config(
+                            dataset,
+                            graph_kernel_type='graph',
+                            mgk_hyperparameters_files=[
+                                mgktools.hyperparameters.product_msnorm],
+                           )
+        dataset.graph_kernel_type = 'graph'
+
+    else:
+        if desc == "RDKit":
+            all_X = CalcRDKitDescriptors(all_X)
+        elif desc == "Morgan":
+            all_X = CalcMorganFingerprints(all_X)
+        elif desc == "Both":
+            all_X = calcBothDescriptors(all_X)
+        elif desc == "Coati":
+            all_X = calcCoati(all_X)
+        elif desc == "ChemBert":
+            all_X = calcChemBert(all_X)
+
+    splitter = get_dataset_splitter(df_all_data,
+                                    split_method=split_method,
+                                    split_columns=split_columns,
+                                    n_splits=n_splits,
+                                    frac_test=frac_test)
+
+    for fold_number, [train_idx, test_idx] in enumerate(splitter):
+        
+        # Subsampling logic (same as before)...
+
+        if myPreds is None:
+            myPreds = {key: empty_myPreds.copy() for key in test_idx.keys()}
+        if predictionStats is None:
+            predictionStats = {key: empty_predictionStats.copy() 
+                               for key in test_idx.keys()}
+
+        y_train = all_y.iloc[train_idx]
+        y_test = {key: all_y.iloc[test_idx[key]] for key in test_idx.keys()}
+
+        model_opts = {}
+        model_fit_opts = {}
+
+        if modelType == 'MGK':
+            x_train = mgktools.data.split.get_data_from_index(dataset, train_idx).X
+            x_test = {key: mgktools.data.split.get_data_from_index(dataset, test_idx[key]).X
+                      for key in test_idx.keys()}
+            model_opts = {
+                'kernel': kernel_config.kernel,
+                'optimizer': None,
+                'alpha': 0.01,
+                'normalize_y': True
+            }
+
+        elif modelType == 'chemprop':
+            # Chemprop specific data split logic...
+            pass  # implement if needed
+
+        else:
+            x_train = all_X.iloc[train_idx]
+            x_test = {key: all_X.iloc[test_idx[key]] for key in test_idx.keys()}
+
+            scaler = StandardScaler()
+            x_train = scaler.fit_transform(x_train)
+            for key in x_test:
+                x_test[key] = scaler.transform(x_test[key])
+
+        model = modelTypes[modelType](**model_opts)
+        model.fit(x_train, y_train, **model_fit_opts)
+        sizeTrain = len(x_train)
+
+        for key in test_idx.keys():
+            y_pred = model.predict(x_test[key])
+
+            # If the model outputs probabilities, threshold at 0.5
+            if hasattr(model, "predict_proba"):
+                y_pred = model.predict_proba(x_test[key])[:, 1]
+                y_pred = (y_pred >= 0.5).astype(int)
+
+            y_true = np.array(y_test[key])
+            y_pred = np.array(y_pred)
+
+            mcc = matthews_corrcoef(y_true, y_pred)
+            sensitivity = recall_score(y_true, y_pred, pos_label=1)
+            specificity = recall_score(y_true, y_pred, pos_label=0)
+
+            myPreds[key].loc[test_idx[key], 'Prediction'] = y_pred
+            myPreds[key].loc[test_idx[key], 'Fold'] = fold_number + 1
+
+            predictionStats[key].loc[fold_number+1] = [
+                sizeTrain,
+                len(test_idx[key]),
+                mcc,
+                sensitivity,
+                specificity
+            ]
+
+    predictionStats = pd.concat(predictionStats, axis=1)
+    avg_row = predictionStats.mean(axis=0)
+    stdev_row = predictionStats.std(axis=0, ddof=0)
+    avg_row.name = 'avg'
+    stdev_row.name = 'stdev'
+
+    predictionStats = pd.concat([predictionStats, avg_row.to_frame().T, 
+                                 stdev_row.to_frame().T], axis=0)
+
+    myPreds = pd.concat(myPreds, axis=1)
+    myPreds.insert(0, 'Original Y', all_y)
+    if all_ids is not None:
+        myPreds.insert(0, 'ID', all_ids)
+
+    return myPreds, predictionStats 
+
+def vary_non_np_proportion(modelType,
+                           desc,
+                           dataset_file,
+                           np_column='natural_product',
+                           strat_column=None,
+                           split_method='k-fold',
+                           n_splits=5,
+                           split_columns=[],
+                           frac_test=None,
+                           step=0.1,
+                           max_frac=1.0,
+                           classify=False):
+    
+    df = pd.read_csv(dataset_file)
+    
+    df_np = df[df[np_column] == 'TRUE']
+    df_non_np = df[df[np_column] == 'FALSE']
+
+    proportions = np.arange(0, max_frac + step, step)
+    results = []
+
+    if classify:
+        looped_method = loopedKfoldCV_classify
+        metrics = ['MCC', 'Sensitivity', 'Specificity']
+    else:
+        looped_method = loopedKfoldCV
+        metrics = ['r2', 'rmsd']
+
+    for prop in proportions:
+        n_samples = int(len(df_non_np) * prop)
+        df_non_np_sample = df_non_np.sample(n=n_samples, random_state=42)
+        combined_df = pd.concat([df_np, df_non_np_sample])
+        temp_file = "temp_subsample.csv"
+        combined_df.to_csv(temp_file, index=False)
+
+        _, stats = looped_method(
+            modelType=modelType,
+            desc=desc,
+            dataset_file=temp_file,
+            strat_column=strat_column,
+            split_method=split_method,
+            n_splits=n_splits,
+            split_columns=split_columns,
+            frac_test=frac_test,
+        )
+
+        avg_stats = stats.xs('avg', axis=0, level=-1)
+        avg_stats['Non-NP Proportion'] = prop
+        results.append(avg_stats)
+
+    df_results = pd.DataFrame(results)
+
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    for metric in metrics:
+        plt.plot(df_results['Non-NP Proportion'], df_results[metric], label=metric)
+    plt.xlabel("Proportion of Non-NP Data in Training Set")
+    plt.ylabel("Metric")
+    plt.title("Model Performance vs. Non-NP Data Proportion")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    plt.savefig(f"vary_np_{dataset_file}.png")
+
+    return df_results
 
 # Downloading CV Stats if desired
 def downloadCVStats(myPreds, predictionStats, title = None):
