@@ -1,0 +1,33 @@
+{
+        "datasets": {
+                "Acetyl": {
+                        "filename": "ClassifyDatasets/Mean_Split/Acetyl_classification_mean_split.csv",
+                        "splits" : ["train-stratifiedNP"],
+			"subsample" : [""],
+                        "subsampleProportion": [1]
+                },
+		"Alpha2b": {
+                        "filename": "ClassifyDatasets/Mean_Split/Alpha2b_classification_mean_split.csv",
+			"splits" : ["train-stratifiedNP"],
+			"subsample" : [""],
+                        "subsampleProportion": [1]
+                },
+		"Mono": {
+                        "filename": "ClassifyDatasets/Mean_Split/Mono_classification_mean_split.csv",
+                        "splits" : ["train-stratifiedNP"],
+			"subsample" : [""],
+                        "subsampleProportion": [1]
+                },
+		"Tyro": {
+                        "filename": "ClassifyDatasets/Mean_Split/Tyro_classification_mean_split.csv",
+			"splits" : ["train-stratifiedNP"],
+                        "subsample" : [""],
+                        "subsampleProportion": [1]
+                }
+        },
+        "models": {
+                "RF": {
+                        "descriptors": ["Both"]
+                }
+        }
+}
