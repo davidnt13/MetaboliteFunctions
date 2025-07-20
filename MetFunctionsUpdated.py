@@ -16,7 +16,8 @@ from rdkit.Chem.Scaffolds.MurckoScaffold import MurckoScaffoldSmiles
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, root_mean_squared_error
-from sklearn.metrics import matthews_corrcoef, recall_score, confusion_matrix
+from sklearn.metrics import (matthews_corrcoef, recall_score, confusion_matrix, 
+        f1_score, roc_auc_score, balanced_accuracy_score)
 import matplotlib.pyplot as plt
 
 from sklearn.model_selection import ShuffleSplit
@@ -29,6 +30,7 @@ from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
 import os
 
 modelTypes = {}
+classify_modelTypes = {}
 
 use_mgk = os.environ.get("USE_MGK")
 
@@ -43,6 +45,15 @@ if use_mgk != "TRUE":
     modelTypes['XGBR'] = XGBRegressor
     modelTypes['SVR'] = SVR
     modelTypes['KNN'] = KNeighborsRegressor
+
+    from sklearn.ensemble import RandomForestClassifier
+    from xgboost import XGBClassifier
+    from sklearn.svm import SVC
+    from sklearn.neighbors import KNeighborsClassifier
+    classify_modelTypes['RF'] = RandomForestClassifier
+    classify_modelTypes['XGBR'] = XGBClassifier
+    classify_modelTypes['SVR'] = SVC
+    classify_modelTypes['KNN'] = KNeighborsClassifier
 
     try:
         import chemprop
@@ -210,7 +221,8 @@ def loopedKfoldCV(modelType,
                   frac_test=None,
                   subsample='',
                   subsampleProportion=1,
-                  NPSubsamp=''):
+                  NPSubsamp='',
+                  target_name="pIC50"):
 
     # = JC: Renamed dfTrain to df_all_data for clarity, to distinguish it from 
     # the training set.
@@ -218,7 +230,7 @@ def loopedKfoldCV(modelType,
     
     # = JC: Renamed train_X/train_y to all_X/all_y for clarity:
     all_X = df_all_data["SMILES"]
-    all_y = df_all_data["pIC50"]
+    all_y = df_all_data["pIC50_vals"] # IF YOU GET AN ERROR, REMEMBER YOU CHANGED THIS (DAVID)
     # Get IDs for data points if ID column is present and check that they are 
     # unique:
     all_ids = df_all_data.get("ID")
@@ -468,13 +480,16 @@ def loopedKfoldCV(modelType,
              stdev = np.std(y_test[key])
              
              # Update predictions
-             myPreds[key].loc[test_idx[key], 'Prediction'] = y_pred
-             myPreds[key].loc[test_idx[key], 'Fold'] = fold_number + 1
+             if key in myPreds:
+                myPreds[key].loc[test_idx[key], 'Prediction'] = y_pred
+                myPreds[key].loc[test_idx[key], 'Fold'] = fold_number + 1
 
-             # Save prediction stats for this CV fold:
-             predictionStats[key].loc[fold_number+1] = [sizeTrain,
-                                                        len(test_idx[key]), r2, 
-                                                        rmsd, bias, sdep, stdev]
+                # Save prediction stats for this CV fold:
+                predictionStats[key].loc[fold_number+1] = [sizeTrain,
+                                                           len(test_idx[key]), r2, 
+                                                           rmsd, bias, sdep, stdev]
+             else:
+                print(f"[Fold {fold_number+1}] Skipped key '{key}' because it was not initialized in myPreds.")
 
     # Create a DataFrame row for averages
     predictionStats = pd.concat(predictionStats, axis=1)
@@ -519,11 +534,12 @@ def loopedKfoldCV_Classify(modelType,
         raise ValueError("Duplicate IDs found in dataset.")
 
     predictionStats = None
-    empty_predictionStats = pd.DataFrame(data=np.zeros((n_splits, 5)), 
+    empty_predictionStats = pd.DataFrame(data=np.zeros((n_splits, 7)), 
                                    columns=['Train Set Size', 
                                             'Number of Molecules', 
                                             'MCC', 'Sensitivity', 
-                                            'Specificity'], 
+                                            'Specificity', 'Balanced Accuracy',
+                                            'F1 Score'], 
                                    index=range(1, n_splits+1))
     empty_predictionStats.index.name = 'Fold'
 
@@ -612,8 +628,27 @@ def loopedKfoldCV_Classify(modelType,
             x_train = scaler.fit_transform(x_train)
             for key in x_test:
                 x_test[key] = scaler.transform(x_test[key])
+        
+        if modelType == 'KNN':
+            from sklearn.model_selection import GridSearchCV
+            from sklearn.metrics import accuracy_score
 
-        model = modelTypes[modelType](**model_opts)
+            X_train2, X_test2, y_train2, y_test2 = train_test_split(x_train, y_train, test_size=0.2, random_state=42)
+
+            param_grid = {
+                'n_neighbors': [3, 5, 7, 9, 11],
+                'weights': ['uniform', 'distance'],
+                'p': [1, 2]  # 1 for Manhattan distance, 2 for Euclidean distance
+            }
+            knn_gsearch = KNeighborsClassifier()
+            grid_search = GridSearchCV(knn_gsearch, param_grid, cv=5, scoring='accuracy')
+            grid_search.fit(X_train2, y_train2)
+            best_params = grid_search.best_params_
+            print("Best Parameters:", best_params)
+
+            model = KNeighborsClassifier(**best_params)
+
+        model = classify_modelTypes[modelType](**model_opts)
         model.fit(x_train, y_train, **model_fit_opts)
         sizeTrain = len(x_train)
 
@@ -631,17 +666,25 @@ def loopedKfoldCV_Classify(modelType,
             mcc = matthews_corrcoef(y_true, y_pred)
             sensitivity = recall_score(y_true, y_pred, pos_label=1)
             specificity = recall_score(y_true, y_pred, pos_label=0)
+            balanced_acc = balanced_accuracy_score(y_true, y_pred)
+            f1 = f1_score(y_true, y_pred)
+            
+            if key in myPreds:
+                myPreds[key].loc[test_idx[key], 'Prediction'] = y_pred
+                myPreds[key].loc[test_idx[key], 'Fold'] = fold_number + 1
 
-            myPreds[key].loc[test_idx[key], 'Prediction'] = y_pred
-            myPreds[key].loc[test_idx[key], 'Fold'] = fold_number + 1
+                predictionStats[key].loc[fold_number+1] = [
+                    sizeTrain,
+                    len(test_idx[key]),
+                    mcc,
+                    sensitivity,
+                    specificity,
+                    balanced_acc,
+                    f1
+                ]
 
-            predictionStats[key].loc[fold_number+1] = [
-                sizeTrain,
-                len(test_idx[key]),
-                mcc,
-                sensitivity,
-                specificity
-            ]
+            else:
+                print(f"[Fold {fold_number+1}] Skipped key '{key}' because it was not initialized in myPreds.")
 
     predictionStats = pd.concat(predictionStats, axis=1)
     avg_row = predictionStats.mean(axis=0)
@@ -662,69 +705,216 @@ def loopedKfoldCV_Classify(modelType,
 def vary_non_np_proportion(modelType,
                            desc,
                            dataset_file,
+                           traindata,
+                           title='',
                            np_column='natural_product',
                            strat_column=None,
-                           split_method='k-fold',
+                           split_method='predefined',
                            n_splits=5,
                            split_columns=[],
                            frac_test=None,
                            step=0.1,
                            max_frac=1.0,
-                           classify=False):
-    
+                           classify=False,
+                           directory='',
+                           reps=5):  # Number of repetitions
+
     df = pd.read_csv(dataset_file)
+    # required_cols = [np_column] + split_columns
+    # df_np = df.loc[df[np_column] == True, required_cols + [col for col in df.columns if col not in required_cols]]
+    # df_non_np = df.loc[df[np_column] == False, required_cols + [col for col in df.columns if col not in required_cols]]
     
-    df_np = df[df[np_column] == 'TRUE']
-    df_non_np = df[df[np_column] == 'FALSE']
+    # Ensure np_column is boolean for consistent comparison
+    if df[np_column].dtype == object:
+        df[np_column] = df[np_column].map({'TRUE': True, 'FALSE': False})
+    
+    required_cols = [np_column] + split_columns
+    df_np = df.loc[df[np_column] == True, required_cols + [col for col in df.columns if col not in required_cols]]
+    df_non_np = df.loc[df[np_column] == False, required_cols + [col for col in df.columns if col not in required_cols]]
+    
+    df_non_np_train = df_non_np[df_non_np[split_columns].eq('train').any(axis=1)]
 
     proportions = np.arange(0, max_frac + step, step)
     results = []
 
-    if classify:
-        looped_method = loopedKfoldCV_classify
-        metrics = ['MCC', 'Sensitivity', 'Specificity']
-    else:
-        looped_method = loopedKfoldCV
-        metrics = ['r2', 'rmsd']
-
+    looped_method = loopedKfoldCV_Classify if classify else loopedKfoldCV
+    metrics = ['MCC', 'Sensitivity', 'Specificity', 'Balanced Accuracy', 'F1 Score'] if classify else ['r2', 'rmsd']
+    
     for prop in proportions:
-        n_samples = int(len(df_non_np) * prop)
-        df_non_np_sample = df_non_np.sample(n=n_samples, random_state=42)
+        # Convert np_column to boolean if needed
+        if df[np_column].dtype == object:
+            df[np_column] = df[np_column].map({'TRUE': True, 'FALSE': False})
+
+        train_idx_array = df_non_np_train.index.to_numpy()
+        n_samples = max(1, int(len(train_idx_array) * prop)) if prop > 0 else 0
+
+        if n_samples > 0:
+            sampled_indices = np.random.choice(train_idx_array, size=n_samples, replace=False)
+            df_non_np_sample = df_non_np_train.loc[sampled_indices]
+        else:
+            df_non_np_sample = pd.DataFrame(columns=df_non_np.columns)
+
         combined_df = pd.concat([df_np, df_non_np_sample])
+
+        # Ensure required columns are preserved
+        for col in split_columns:
+            if col not in combined_df.columns:
+                raise ValueError(f"Missing required split column: {col}")
+
         temp_file = "temp_subsample.csv"
         combined_df.to_csv(temp_file, index=False)
+       
+        all_avg_rows = []
 
-        _, stats = looped_method(
-            modelType=modelType,
-            desc=desc,
-            dataset_file=temp_file,
-            strat_column=strat_column,
-            split_method=split_method,
-            n_splits=n_splits,
-            split_columns=split_columns,
-            frac_test=frac_test,
-        )
+        reps = 5
 
-        avg_stats = stats.xs('avg', axis=0, level=-1)
-        avg_stats['Non-NP Proportion'] = prop
-        results.append(avg_stats)
+        for rep in range(reps):
+            rep_count = f'_rep-{rep}' if rep > 0 else '' # No suffix for rep 0 if you prefer
+            split_columns = [f'{traindata}_CVfold-{j}{rep_count}' for j in range(5)]
+
+            _, stats = looped_method(
+                modelType=modelType,
+                desc=desc,
+                dataset_file=temp_file,
+                strat_column=strat_column,
+                split_method=split_method,
+                split_columns=split_columns,
+                n_splits=n_splits,
+                frac_test=frac_test,
+            )
+        
+            avg_row = stats.loc['avg']
+            # Flatten MultiIndex if needed
+            avg_row.index = [' '.join(col).strip() if isinstance(col, tuple) else col for col in avg_row.index]
+            avg_row.name = f'avg_{rep}'
+            all_avg_rows.append(avg_row)
+        
+        # Combine all repetition averages
+        mean_df = pd.DataFrame(all_avg_rows)
+        overall_avg = mean_df.mean(axis=0)
+        overall_std = mean_df.std(axis=0, ddof=1)  # std for error bars
+        
+        # Create result row with _stderr columns
+        result_row = overall_avg.copy()
+        for col in overall_std.index:
+            result_row[f"{col}_stderr"] = overall_std[col]  # or divide by sqrt(reps) for standard error
+        
+        result_row['Non-NP Proportion'] = prop
+        results.append(result_row)
+        
+        print(result_row)
+
+        # all_preds = pd.DataFrame()
+
+        # _, stats = looped_method(
+        #         modelType=modelType,
+        #         desc=desc,
+        #         dataset_file=temp_file,
+        #         strat_column=strat_column,
+        #         split_method=split_method,
+        #         split_columns=split_columns,
+        #         n_splits=n_splits,
+        #         frac_test=frac_test,
+        # )
+        # print(stats)
+
+        # avg_row = stats.loc['avg']
+        # stdev_row = stats.loc['stdev']
+
+        # # Flatten the column MultiIndex
+        # avg_row.index = [' '.join(col).strip() if isinstance(col, tuple) else col for col in avg_row.index]
+        # stdev_row.index = [' '.join(col).strip() if isinstance(col, tuple) else col for col in stdev_row.index]
+
+        # # all_preds = pd.concat([all_preds, avg_row.to_frame().T])
+        # result_row = avg_row.copy()
+        # for col in stdev_row.index:
+        #     result_row[f"{col}_stderr"] = stdev_row[col]
+        # 
+        # result_row['Non-NP Proportion'] = prop
+        # results.append(result_row)
+
+        print(f"Finished Proportion: {prop}")
+
 
     df_results = pd.DataFrame(results)
+    
+    print(f"Classify: {classify}")
+    print(f"Using looped method: {looped_method.__name__}")
+
 
     # Plotting
-    plt.figure(figsize=(10, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+
+    # --- Subplot 1: test-NP ---
+    ax = axes[0]
     for metric in metrics:
-        plt.plot(df_results['Non-NP Proportion'], df_results[metric], label=metric)
-    plt.xlabel("Proportion of Non-NP Data in Training Set")
-    plt.ylabel("Metric")
-    plt.title("Model Performance vs. Non-NP Data Proportion")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
+        colname = f"test-NP {metric}"
+        stderr_colname = f"{colname}_stderr"
+        if colname in df_results.columns:
+            ax.errorbar(
+                df_results['Non-NP Proportion'],
+                df_results[colname],
+                yerr=df_results.get(stderr_colname),
+                fmt='-o',
+                label=metric,
+                capsize=4
+            )
+    ax.set_xlabel("Proportion of Non-NP Data in Training Set")
+    ax.set_ylabel("Score")
+    ax.set_title("Performance on Natural Products (test-NP)")
+    ax.legend()
+    ax.grid(True)
+    
+    # --- Subplot 2: test-nonNP ---
+    ax = axes[1]
+    for metric in metrics:
+        colname = f"test-nonNP {metric}"
+        stderr_colname = f"{colname}_stderr"
+        if colname in df_results.columns:
+            ax.errorbar(
+                df_results['Non-NP Proportion'],
+                df_results[colname],
+                yerr=df_results.get(stderr_colname),
+                fmt='-o',
+                label=metric,
+                capsize=4
+            )
+    ax.set_xlabel("Proportion of Non-NP Data in Training Set")
+    ax.set_title("Performance on Non-Natural Products (test-nonNP)")
+    ax.legend()
+    ax.grid(True)
+    
+    plt.suptitle(f"{title}: Model Performance on Test Sets", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(f"{directory}/vary_non_np_{title}_testNP_vs_nonNP.png")
     plt.show()
-    plt.savefig(f"vary_np_{dataset_file}.png")
+
+    # plt.figure(figsize=(10, 6))
+    # for metric in metrics:
+    #     colname = f"test-NP {metric}"
+    #     stderr_colname = f"{colname}_stderr"
+    #     if colname in df_results.columns:
+    #         # plt.plot(df_results['Non-NP Proportion'], df_results[colname], marker='o', label=metric)
+    #         plt.errorbar(
+    #             df_results['Non-NP Proportion'],
+    #             df_results[colname],
+    #             yerr=df_results[stderr_colname],
+    #             fmt='-o',
+    #             label=metric,
+    #             capsize=4
+    #         )
+
+    # plt.xlabel("Proportion of Non-NP Data in Training Set")
+    # plt.ylabel("Score (test-NP)")
+    # plt.title(f"{title}: Model Performance on Natural Products")
+    # plt.legend()
+    # plt.grid(True)
+    # plt.tight_layout()
+    # plt.savefig(f"{directory}/vary_non_np_{title}_testNP.png")
+    # plt.show()
 
     return df_results
+
 
 # Downloading CV Stats if desired
 def downloadCVStats(myPreds, predictionStats, title = None):
